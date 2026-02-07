@@ -11,18 +11,217 @@ Decagon uses the [Effect](https://effect.website) library to express all busines
 3. Can be tested in isolation with mock implementations
 4. Are executed only at the application boundary (API routes)
 
+## Step 2: HTTP 402 Payment Flow
+
+The core flow demonstrates the effectful architecture:
+
+```
+GET /article/:id (no auth)
+    ↓
+Workflow: getArticle
+    ↓ (yields to ArticlesStore)
+    ↓ (yields to ChallengesStore to create challenge)
+    ↓ (fails with PaymentRequiredError)
+    ↓
+HTTP 402 + PaymentChallenge
+    ↓
+POST /pay/verify {challengeId, transactionRef, payerAddress}
+    ↓
+Workflow: verifyPaymentAndIssueSession
+    ↓ (yields to ChallengesStore to validate)
+    ↓ (yields to PaymentVerifier to verify)
+    ↓ (yields to ReceiptsStore to persist)
+    ↓
+SessionToken {tokenId, credits: 100}
+    ↓
+GET /article/:id + Authorization: Bearer <tokenId>
+    ↓
+Workflow: getArticle
+    ↓ (yields to ReceiptsStore to check credits)
+    ↓ (yields to ReceiptsStore to consume 1 credit)
+    ↓
+ArticleResponse {hasFullAccess: true, content: "...full..."}
+```
+
+## Step 3: Policy Enforcement Flow
+
+Step 3 adds a **policy gate** before payment challenge creation, ensuring users and agents can only spend within configured limits.
+
+```
+POST /policy/check {amountCents, path, origin?}
+    ↓                   + Authorization: Bearer <agentToken?>
+    ↓
+Workflow: checkPaymentPolicy
+    ↓ (yields to AgentStore to resolve agent)
+    ↓ (yields to PolicyStore to get policy)
+    ↓ (yields to UsageStore to get daily spend)
+    ↓ (calls pure checkPolicy function)
+    ↓
+PolicyCheckResult {allowed, needsConfirm, currentDailySpend, policy}
+    ↓
+    ├── If blocked: PolicyViolationError {reason, _tag}
+    │
+    └── If allowed: Proceed to 402 flow
+        ↓
+    POST /pay/verify ...
+        ↓
+    Workflow: recordSpend
+        ↓ (yields to UsageStore to add spend)
+        ↓
+    UsageRecorded {newDailyTotal}
+```
+
+### The Policy Gate Pattern
+
+The policy check is a **gate** that sits before the payment challenge is created. This ensures:
+
+1. **Pre-authorization**: Before any payment is attempted, policy is checked
+2. **Fail-fast**: Blocked payments never reach the payment infrastructure  
+3. **User confirmation**: Large payments can require explicit user confirmation
+4. **Agent scoping**: AI agents have stricter limits than human users
+
+### Pure Policy Enforcement
+
+The core policy check is a **pure function** with no effects:
+
+```typescript
+// packages/core/src/policy/check-policy.ts
+
+export function checkPolicy(params: CheckPolicyParams): PolicyCheckResult {
+  const { policy, amountCents, currentDailySpendCents, path, origin, subjectType, subjectId } = params;
+
+  // Check path allowlist
+  if (!pathMatches(path, policy.allowedPaths)) {
+    return { allowed: false, error: policyViolation("Path not allowed") };
+  }
+
+  // Check origin allowlist  
+  if (origin && !originMatches(origin, policy.allowedOrigins)) {
+    return { allowed: false, error: policyViolation("Origin not allowed") };
+  }
+
+  // Check per-action limit
+  if (amountCents > policy.maxPerActionCents) {
+    return { allowed: false, error: policyViolation("Exceeds max per action") };
+  }
+
+  // Check daily cap
+  if (currentDailySpendCents + amountCents > policy.dailyCapCents) {
+    return { allowed: false, error: policyViolation("Exceeds daily cap") };
+  }
+
+  // Determine if confirmation needed
+  const needsConfirm = amountCents >= policy.requireConfirmAboveCents;
+  
+  return { allowed: true, needsConfirm, policy, currentDailySpend: currentDailySpendCents };
+}
+```
+
+This pure function is wrapped in an Effect workflow that handles I/O:
+
+```typescript
+// packages/core/src/workflows/policy-workflows.ts
+
+export const checkPaymentPolicy = (input: CheckPolicyInput) =>
+  Effect.gen(function* () {
+    const agentStore = yield* AgentStore;
+    const policyStore = yield* PolicyStore;
+    const usageStore = yield* UsageStore;
+    
+    // Resolve subject (agent or user)
+    const subject = input.agentToken 
+      ? yield* agentStore.getByToken(input.agentToken)
+      : { type: "user", id: input.userId, policy: yield* policyStore.get(input.userId) };
+    
+    // Get current daily spend
+    const dailySpend = yield* usageStore.getDailySpendCents(makeSubjectId(subject));
+    
+    // Pure policy check
+    return checkPolicy({
+      policy: subject.policy,
+      amountCents: input.amountCents,
+      currentDailySpendCents: dailySpend,
+      path: input.path,
+      origin: input.origin,
+      subjectType: subject.type,
+      subjectId: subject.id,
+    });
+  });
+
 ## Effect Inventory (I/O Boundaries)
 
 All external interactions are modeled as **Effect services** — interfaces that abstract over I/O operations.
+
+### Step 2 Capabilities
 
 | Effect | Purpose | Location | Status |
 |--------|---------|----------|--------|
 | **ArticlesStore** | Persistence for articles | `packages/core/src/capabilities/articles-store.ts` | Mock |
 | **ReceiptsStore** | Persistence for receipts & sessions | `packages/core/src/capabilities/receipts-store.ts` | Mock |
+| **ChallengesStore** | Persistence for payment challenges | `packages/core/src/capabilities/challenges-store.ts` | Mock |
 | **Clock** | Time operations | `packages/core/src/capabilities/clock.ts` | Mock |
 | **IdGen** | Unique ID generation | `packages/core/src/capabilities/id-gen.ts` | Mock |
 | **Logger** | Structured logging | `packages/core/src/capabilities/logger.ts` | Mock |
 | **PaymentVerifier** | Blockchain verification | `packages/core/src/capabilities/payment-verifier.ts` | Mock |
+
+### Step 3 Capabilities (Policy + Agents)
+
+| Effect | Purpose | Location | Status |
+|--------|---------|----------|--------|
+| **PolicyStore** | User spend policy persistence | `packages/core/src/capabilities/policy-store.ts` | Mock |
+| **AgentStore** | Agent token management | `packages/core/src/capabilities/agent-store.ts` | Mock |
+| **UsageStore** | Daily spend tracking | `packages/core/src/capabilities/usage-store.ts` | Mock |
+
+#### PolicyStore
+
+```typescript
+export interface PolicyStore {
+  readonly getUserPolicy: (userId: string) => Effect.Effect<SpendPolicy, never>;
+  readonly setUserPolicy: (userId: string, policy: SpendPolicy) => Effect.Effect<void, never>;
+  readonly hasUserPolicy: (userId: string) => Effect.Effect<boolean, never>;
+}
+```
+
+The PolicyStore manages user-defined spend limits:
+- **maxPerActionCents**: Maximum spend per single action
+- **dailyCapCents**: Maximum daily spend
+- **autoApproveUnderCents**: Auto-approve amounts below this
+- **requireConfirmAboveCents**: Require confirmation above this
+- **allowedOrigins**: Allowlist of request origins
+- **allowedPaths**: Allowlist of resource paths
+
+#### AgentStore
+
+```typescript
+export interface AgentStore {
+  readonly createAgent: (userId: string, name: string, policy: SpendPolicy) => Effect.Effect<Agent, never>;
+  readonly getAgentByToken: (token: string) => Effect.Effect<Agent, ApiError>;
+  readonly getAgentById: (agentId: string) => Effect.Effect<Agent, ApiError>;
+  readonly listAgentsByUser: (userId: string) => Effect.Effect<readonly Agent[], never>;
+  readonly updateLastUsed: (agentId: string) => Effect.Effect<void, ApiError>;
+  readonly deleteAgent: (agentId: string) => Effect.Effect<void, ApiError>;
+}
+```
+
+Agents are scoped tokens with their own policies (often stricter than the user's policy). This enables:
+- **Delegation**: Give AI agents limited spending authority
+- **Isolation**: Each agent has independent spend tracking
+- **Audit**: Track which agent performed which transactions
+
+#### UsageStore
+
+```typescript
+export interface UsageStore {
+  readonly getDailySpendCents: (subjectId: string) => Effect.Effect<number, never>;
+  readonly addSpendCents: (subjectId: string, amountCents: number) => Effect.Effect<number, never>;
+  readonly resetDailySpend: (subjectId: string) => Effect.Effect<void, never>;
+}
+```
+
+The UsageStore tracks daily spend by subject (user or agent):
+- Subject ID format: `user:{userId}:{YYYY-MM-DD}` or `agent:{agentId}:{YYYY-MM-DD}`
+- Enables daily cap enforcement
+- Resets at midnight (not implemented in mock)
 
 ### Future Effects (Not Yet Implemented)
 
@@ -44,6 +243,8 @@ import { Context, Effect } from "effect";
 export interface Clock {
   readonly now: () => Effect.Effect<string, never>;
   readonly futureSeconds: (seconds: number) => Effect.Effect<string, never>;
+  readonly futureMinutes: (minutes: number) => Effect.Effect<string, never>;
+  readonly futureHours: (hours: number) => Effect.Effect<string, never>;
   readonly isPast: (isoTimestamp: string) => Effect.Effect<boolean, never>;
 }
 
@@ -62,42 +263,30 @@ export const Clock = Context.GenericTag<Clock>("@decagon/core/Clock");
 
 All business logic lives in `packages/core/src/workflows/` as **pure Effect workflows**.
 
-### Workflow: `getArticle`
+### Workflow: `getArticle` (Step 2)
+
+Uses `Effect.gen` for cleaner generator-style composition:
 
 ```typescript
 // packages/core/src/workflows/get-article.ts
 
 export const getArticle = (
   input: GetArticleInput
-): Effect.Effect<
-  ArticleResponse,      // Success type
-  ApiError,             // Error type
-  ArticlesStore | Logger // Required capabilities
-> =>
-  pipe(
-    Effect.flatMap(Logger, (logger) => 
-      logger.info("Getting article", { articleId: input.articleId })
-    ),
-    Effect.flatMap(() =>
-      Effect.flatMap(ArticlesStore, (store) => store.getById(input.articleId))
-    ),
-    Effect.map((article): ArticleResponse => ({
-      article,
-      hasFullAccess: false,
-      content: article.preview,
-    }))
-  );
+): Effect.Effect<ArticleResponse, ApiError, AllCapabilities> =>
+  Effect.gen(function* () {
+    const articlesStore = yield* ArticlesStore;
+    const article = yield* articlesStore.getById(input.articleId);
+
+    // No session token = return 402
+    if (!input.sessionTokenId) {
+      return yield* createChallengeAndFail(article);
+    }
+
+    return yield* checkSessionAndUnlock(article, input.sessionTokenId);
+  });
 ```
 
-### Workflow: `createPaymentChallenge`
-
-```typescript
-// packages/core/src/workflows/create-payment-challenge.ts
-
-export const createPaymentChallenge = (
-  input: CreatePaymentChallengeInput
-): Effect.Effect<
-  PaymentChallenge,
+### Workflow: `verifyPaymentAndIssueSession` (Step 2)
   ApiError,
   ArticlesStore | Clock | IdGen | Logger
 > =>
@@ -228,14 +417,81 @@ export const MockClock = Layer.succeed(
   })
 );
 
+// Step 3: Policy and Agent mocks with in-memory storage
+const policiesDb = new Map<string, SpendPolicy>();
+const agentsDb = new Map<string, Agent>();
+const agentsByToken = new Map<string, Agent>();
+const usageDb = new Map<string, number>();
+
+export const MockPolicyStore = Layer.succeed(
+  PolicyStore,
+  PolicyStore.of({
+    getUserPolicy: (userId) => Effect.sync(() => 
+      policiesDb.get(userId) ?? DEFAULT_SPEND_POLICY
+    ),
+    setUserPolicy: (userId, policy) => Effect.sync(() => {
+      policiesDb.set(userId, policy);
+    }),
+    hasUserPolicy: (userId) => Effect.sync(() => policiesDb.has(userId)),
+  })
+);
+
+export const MockAgentStore = Layer.succeed(
+  AgentStore,
+  AgentStore.of({
+    createAgent: (userId, name, policy) => Effect.sync(() => {
+      const agent: Agent = {
+        agentId: `agent_${crypto.randomUUID()}`,
+        agentToken: `agt_${crypto.randomUUID()}`,
+        userId,
+        name,
+        policy,
+        createdAt: new Date().toISOString(),
+      };
+      agentsDb.set(agent.agentId, agent);
+      agentsByToken.set(agent.agentToken, agent);
+      return agent;
+    }),
+    getAgentByToken: (token) => Effect.sync(() => {
+      const agent = agentsByToken.get(token);
+      if (!agent) throw new Error("Agent not found");
+      return agent;
+    }),
+    // ...
+  })
+);
+
+export const MockUsageStore = Layer.succeed(
+  UsageStore,
+  UsageStore.of({
+    getDailySpendCents: (subjectId) => Effect.sync(() => 
+      usageDb.get(subjectId) ?? 0
+    ),
+    addSpendCents: (subjectId, amount) => Effect.sync(() => {
+      const current = usageDb.get(subjectId) ?? 0;
+      const newTotal = current + amount;
+      usageDb.set(subjectId, newTotal);
+      return newTotal;
+    }),
+    resetDailySpend: (subjectId) => Effect.sync(() => {
+      usageDb.delete(subjectId);
+    }),
+  })
+);
+
 // Combine all mocks
 export const MockCapabilities = Layer.mergeAll(
   MockArticlesStore,
   MockReceiptsStore,
+  MockChallengesStore,
   MockClock,
   MockIdGen,
   MockLogger,
-  MockPaymentVerifier
+  MockPaymentVerifier,
+  // Step 3
+  MockPolicyStore,
+  MockAgentStore,
+  MockUsageStore
 );
 ```
 

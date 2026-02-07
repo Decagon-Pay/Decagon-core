@@ -1,15 +1,20 @@
 /**
- * Mock Implementations
+ * Mock Implementations - Step 3
  * 
  * In-memory mock implementations of all capabilities.
  * For development and testing purposes only.
  */
 
 import { Effect, Layer } from "effect";
-import type { Article, Receipt, SessionToken, ApiError, NotFoundError, InternalError } from "@decagon/x402";
+import type { Article, Receipt, SessionToken, PaymentChallenge, ApiError, NotFoundError, InternalError, SpendPolicy, Agent } from "@decagon/x402";
+import { DEFAULT_SPEND_POLICY } from "@decagon/x402";
 import { 
   ArticlesStore, 
   ReceiptsStore, 
+  ChallengesStore,
+  PolicyStore,
+  AgentStore,
+  UsageStore,
   Clock, 
   IdGen, 
   Logger,
@@ -88,7 +93,12 @@ const MOCK_ARTICLES: Article[] = [
 // In-memory stores
 const receiptsDb = new Map<string, Receipt>();
 const sessionsDb = new Map<string, SessionToken>();
+const challengesDb = new Map<string, PaymentChallenge>();
 const usedTransactions = new Set<string>();
+const policiesDb = new Map<string, SpendPolicy>();
+const agentsDb = new Map<string, Agent>();
+const agentsByToken = new Map<string, Agent>();
+const usageDb = new Map<string, number>(); // key: "subjectId:dayKey" -> cents
 
 // ============================================
 // Helper Functions
@@ -133,7 +143,7 @@ export const MockArticlesStore = Layer.succeed(
 );
 
 // ============================================
-// Mock ReceiptsStore
+// Mock ReceiptsStore - Step 2
 // ============================================
 
 export const MockReceiptsStore = Layer.succeed(
@@ -150,7 +160,7 @@ export const MockReceiptsStore = Layer.succeed(
         Effect.flatMap((receipt) =>
           receipt
             ? Effect.succeed(receipt)
-            : Effect.fail(notFound("Receipt", receiptId))
+            : Effect.fail(notFound("Receipt", receiptId) as ApiError)
         )
       ),
 
@@ -165,30 +175,95 @@ export const MockReceiptsStore = Layer.succeed(
         Effect.flatMap((session) =>
           session
             ? Effect.succeed(session)
-            : Effect.fail(notFound("Session", tokenId))
+            : Effect.fail(notFound("Session", tokenId) as ApiError)
         )
       ),
 
-    updateSessionBalance: (tokenId: string, newBalance: number, newAccessCount: number) =>
-      Effect.sync(() => sessionsDb.get(tokenId)).pipe(
-        Effect.flatMap((session) => {
-          if (!session) {
-            return Effect.fail(notFound("Session", tokenId));
-          }
-          const updated: SessionToken = {
-            ...session,
-            balance: newBalance,
-            accessCount: newAccessCount,
-          };
-          sessionsDb.set(tokenId, updated);
-          return Effect.succeed(updated);
-        })
-      ),
+    consumeCredits: (tokenId: string, amount: number) =>
+      Effect.gen(function* () {
+        const session = sessionsDb.get(tokenId);
+        if (!session) {
+          return yield* Effect.fail(notFound("Session", tokenId) as ApiError);
+        }
+        if (session.credits < amount) {
+          return yield* Effect.fail(internalError(`Insufficient credits: need ${amount}, have ${session.credits}`) as ApiError);
+        }
+        const updated: SessionToken = {
+          ...session,
+          credits: session.credits - amount,
+          accessCount: session.accessCount + 1,
+        };
+        sessionsDb.set(tokenId, updated);
+        return updated;
+      }),
+
+    addCredits: (tokenId: string, amount: number) =>
+      Effect.gen(function* () {
+        const session = sessionsDb.get(tokenId);
+        if (!session) {
+          return yield* Effect.fail(notFound("Session", tokenId) as ApiError);
+        }
+        const updated: SessionToken = {
+          ...session,
+          credits: session.credits + amount,
+        };
+        sessionsDb.set(tokenId, updated);
+        return updated;
+      }),
 
     hasReceiptForChallenge: (challengeId: string) =>
       Effect.succeed(
         Array.from(receiptsDb.values()).some((r) => r.challengeId === challengeId)
       ),
+  })
+);
+
+// ============================================
+// Mock ChallengesStore
+// ============================================
+
+export const MockChallengesStore = Layer.succeed(
+  ChallengesStore,
+  ChallengesStore.of({
+    save: (challenge: PaymentChallenge) =>
+      Effect.sync(() => {
+        challengesDb.set(challenge.challengeId, challenge);
+        return challenge;
+      }),
+
+    get: (challengeId: string) =>
+      Effect.sync(() => challengesDb.get(challengeId)).pipe(
+        Effect.flatMap((challenge) =>
+          challenge
+            ? Effect.succeed(challenge)
+            : Effect.fail(notFound("Challenge", challengeId) as ApiError)
+        )
+      ),
+
+    markPaid: (challengeId: string) =>
+      Effect.gen(function* () {
+        const challenge = challengesDb.get(challengeId);
+        if (!challenge) {
+          return yield* Effect.fail(notFound("Challenge", challengeId) as ApiError);
+        }
+        const updated: PaymentChallenge = { ...challenge, status: "paid" };
+        challengesDb.set(challengeId, updated);
+        return updated;
+      }),
+
+    markExpired: (challengeId: string) =>
+      Effect.gen(function* () {
+        const challenge = challengesDb.get(challengeId);
+        if (!challenge) {
+          return yield* Effect.fail(notFound("Challenge", challengeId) as ApiError);
+        }
+        const updated: PaymentChallenge = { ...challenge, status: "expired" };
+        challengesDb.set(challengeId, updated);
+        return updated;
+      }),
+
+    exists: (challengeId: string) =>
+      Effect.succeed(challengesDb.has(challengeId)),
   })
 );
 
@@ -208,6 +283,9 @@ export const MockClock = Layer.succeed(
 
     futureMinutes: (minutes: number) =>
       Effect.sync(() => new Date(Date.now() + minutes * 60 * 1000).toISOString()),
+
+    futureHours: (hours: number) =>
+      Effect.sync(() => new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()),
 
     isPast: (isoTimestamp: string) =>
       Effect.sync(() => new Date(isoTimestamp).getTime() < Date.now()),
@@ -273,7 +351,7 @@ export const MockLogger = Layer.succeed(
 );
 
 // ============================================
-// Mock PaymentVerifier
+// Mock PaymentVerifier - Step 2
 // ============================================
 
 export const MockPaymentVerifier = Layer.succeed(
@@ -281,13 +359,11 @@ export const MockPaymentVerifier = Layer.succeed(
   PaymentVerifier.of({
     verify: (challenge, proof) =>
       Effect.sync((): VerificationResult => {
-        // Mock: always succeeds if amount matches
-        const valid = proof.amount >= challenge.amountRequired;
+        // Mock: always succeeds - simulates successful blockchain verification
         return {
-          valid,
-          verifiedAmount: proof.amount,
+          valid: true,
+          verifiedAmount: challenge.amountRequired,
           verifiedAt: new Date().toISOString(),
-          errorMessage: valid ? undefined : "Insufficient payment amount",
         };
       }),
 
@@ -297,6 +373,132 @@ export const MockPaymentVerifier = Layer.succeed(
     markTransactionUsed: (transactionRef: string) =>
       Effect.sync(() => {
         usedTransactions.add(transactionRef);
+      }),
+  })
+);
+
+// ============================================
+// Mock PolicyStore - Step 3
+// ============================================
+
+let agentIdCounter = 0;
+
+export const MockPolicyStore = Layer.succeed(
+  PolicyStore,
+  PolicyStore.of({
+    getUserPolicy: (userId: string) =>
+      Effect.sync(() => policiesDb.get(userId) ?? DEFAULT_SPEND_POLICY),
+
+    setUserPolicy: (userId: string, policy: SpendPolicy) =>
+      Effect.sync(() => {
+        policiesDb.set(userId, policy);
+        return policy;
+      }),
+
+    hasUserPolicy: (userId: string) =>
+      Effect.succeed(policiesDb.has(userId)),
+  })
+);
+
+// ============================================
+// Mock AgentStore - Step 3
+// ============================================
+
+export const MockAgentStore = Layer.succeed(
+  AgentStore,
+  AgentStore.of({
+    createAgent: (userId: string, name: string, policy: SpendPolicy) =>
+      Effect.sync(() => {
+        const agentId = `agent_${++agentIdCounter}_${Date.now().toString(36)}`;
+        const agentToken = `agt_${crypto.randomUUID().replace(/-/g, "")}`;
+        const agent: Agent = {
+          agentId,
+          agentToken,
+          userId,
+          policy,
+          name,
+          createdAt: new Date().toISOString(),
+        };
+        agentsDb.set(agentId, agent);
+        agentsByToken.set(agentToken, agent);
+        return agent;
+      }),
+
+    getAgentByToken: (agentToken: string) =>
+      Effect.sync(() => agentsByToken.get(agentToken)).pipe(
+        Effect.flatMap((agent) =>
+          agent
+            ? Effect.succeed(agent)
+            : Effect.fail({
+                _tag: "AgentNotAuthorisedError",
+                message: `Invalid agent token`,
+                timestamp: new Date().toISOString(),
+                agentToken,
+                reason: "Token not found",
+              } as ApiError)
+        )
+      ),
+
+    getAgentById: (agentId: string) =>
+      Effect.sync(() => agentsDb.get(agentId)).pipe(
+        Effect.flatMap((agent) =>
+          agent
+            ? Effect.succeed(agent)
+            : Effect.fail(notFound("Agent", agentId) as ApiError)
+        )
+      ),
+
+    listAgentsByUser: (userId: string) =>
+      Effect.sync(() =>
+        Array.from(agentsDb.values()).filter((a) => a.userId === userId)
+      ),
+
+    updateLastUsed: (agentId: string) =>
+      Effect.gen(function* () {
+        const agent = agentsDb.get(agentId);
+        if (!agent) {
+          return yield* Effect.fail(notFound("Agent", agentId) as ApiError);
+        }
+        const updated: Agent = {
+          ...agent,
+          lastUsedAt: new Date().toISOString(),
+        };
+        agentsDb.set(agentId, updated);
+        agentsByToken.set(agent.agentToken, updated);
+        return updated;
+      }),
+
+    deleteAgent: (agentId: string) =>
+      Effect.sync(() => {
+        const agent = agentsDb.get(agentId);
+        if (agent) {
+          agentsByToken.delete(agent.agentToken);
+          agentsDb.delete(agentId);
+        }
+      }),
+  })
+);
+
+// ============================================
+// Mock UsageStore - Step 3
+// ============================================
+
+export const MockUsageStore = Layer.succeed(
+  UsageStore,
+  UsageStore.of({
+    getDailySpendCents: (subjectId: string, dayKey: string) =>
+      Effect.succeed(usageDb.get(`${subjectId}:${dayKey}`) ?? 0),
+
+    addSpendCents: (subjectId: string, dayKey: string, amountCents: number) =>
+      Effect.sync(() => {
+        const key = `${subjectId}:${dayKey}`;
+        const current = usageDb.get(key) ?? 0;
+        usageDb.set(key, current + amountCents);
+      }),
+
+    resetDailySpend: (subjectId: string, dayKey: string) =>
+      Effect.sync(() => {
+        usageDb.delete(`${subjectId}:${dayKey}`);
       }),
   })
 );
@@ -312,6 +514,10 @@ export const MockPaymentVerifier = Layer.succeed(
 export const MockCapabilities = Layer.mergeAll(
   MockArticlesStore,
   MockReceiptsStore,
+  MockChallengesStore,
+  MockPolicyStore,
+  MockAgentStore,
+  MockUsageStore,
   MockClock,
   MockIdGen,
   MockLogger,

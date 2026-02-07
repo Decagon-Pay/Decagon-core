@@ -100,12 +100,12 @@ pnpm typecheck  # Type-check all packages
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check |
-| GET | `/articles` | List all articles |
-| GET | `/article/:id` | Get article by ID |
-| POST | `/credits/topup` | Create payment challenge |
-| POST | `/pay/verify` | Verify payment (mock) |
+| GET | `/articles` | List all articles (preview only) |
+| GET | `/article/:id` | Get article - returns 402 or full content |
+| GET | `/credits/balance` | Get current credit balance |
+| POST | `/pay/verify` | Verify payment, get session token |
 
-## HTTP 402 Flow
+## HTTP 402 Flow (Step 2 - Implemented!)
 
 ```
 Client                          Server
@@ -114,17 +114,18 @@ Client                          Server
   │ ─────────────────────────────>│
   │                               │
   │  402 Payment Required         │
-  │  { challenge, preview }       │
+  │  { challenge, creditsOffered }│
   │ <─────────────────────────────│
   │                               │
-  │  [User pays via Plasma]       │
+  │  [User pays via Plasma mock]  │
   │                               │
   │  POST /pay/verify             │
-  │  { challengeId, txRef }       │
+  │  { challengeId, txRef, payer }│
   │ ─────────────────────────────>│
   │                               │
   │  200 OK                       │
   │  { receipt, sessionToken }    │
+  │  (100 credits)                │
   │ <─────────────────────────────│
   │                               │
   │  GET /article/123             │
@@ -132,12 +133,21 @@ Client                          Server
   │ ─────────────────────────────>│
   │                               │
   │  200 OK { fullContent }       │
+  │  (1 credit consumed)          │
   │ <─────────────────────────────│
+```
+
+## Agent Demo
+
+Run the agent demo script to see the full 402 flow:
+
+```bash
+npx tsx scripts/agent-demo.ts
 ```
 
 ## Project Status
 
-### Step 1 (Current): Foundation ✅
+### Step 1: Foundation ✅
 
 - [x] Monorepo setup (pnpm + Turborepo)
 - [x] Protocol types (`@decagon/x402`)
@@ -146,11 +156,15 @@ Client                          Server
 - [x] Web UI scaffold
 - [x] Documentation
 
-### Step 2 (Next): HTTP 402 Integration
+### Step 2: HTTP 402 Integration ✅
 
-- [ ] Return real HTTP 402 responses
-- [ ] Session token validation
-- [ ] Content gating based on payment
+- [x] Return real HTTP 402 responses
+- [x] ChallengesStore for payment challenges
+- [x] Session token with credits
+- [x] Content gating (1 credit per unlock)
+- [x] Credits balance tracking
+- [x] Checkout UI overlay
+- [x] Agent demo script
 
 ### Step 3 (Future): Blockchain Integration
 

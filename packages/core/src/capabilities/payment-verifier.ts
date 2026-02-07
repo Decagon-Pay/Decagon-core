@@ -1,5 +1,5 @@
 /**
- * PaymentVerifier Capability
+ * PaymentVerifier Capability - Step 2
  * 
  * Interface for verifying payments.
  * This is an effect boundary - future implementations will verify on-chain transactions.
@@ -13,20 +13,14 @@ import type { PaymentChallenge, ApiError } from "@decagon/x402";
  * Payment proof submitted by client
  */
 export interface PaymentProof {
-  /** The challenge being satisfied */
-  readonly challengeId: string;
-
-  /** Transaction hash/reference (mock for now) */
+  /** Transaction hash/reference */
   readonly transactionRef: string;
 
-  /** Sender address (mock for now) */
-  readonly fromAddress: string;
+  /** Payer wallet address */
+  readonly payerAddress: string;
 
-  /** Amount claimed to be paid */
-  readonly amount: number;
-
-  /** Currency of payment */
-  readonly currency: string;
+  /** Chain the payment was made on */
+  readonly chain: string;
 }
 
 /**

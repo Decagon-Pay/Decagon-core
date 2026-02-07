@@ -1,13 +1,21 @@
 /**
- * Verify Payment and Issue Session Workflow
+ * Verify Payment and Issue Session Workflow - Step 2
  * 
- * Pure workflow for verifying payment proofs and issuing session tokens.
+ * Flow:
+ * 1. Validate challenge exists and is not expired
+ * 2. Verify payment proof (mock for now)
+ * 3. Mark challenge as paid
+ * 4. Create receipt with credits purchased
+ * 5. Create or update session with credits
+ * 6. Return session token
  */
 
 import { Effect, pipe } from "effect";
-import type { Receipt, SessionToken, PaymentChallenge, ApiError, InvalidPaymentError } from "@decagon/x402";
+import type { Receipt, SessionToken, ApiError, InvalidPaymentError, VerifyRequest, VerifyResponse } from "@decagon/x402";
+import { TOPUP_CREDITS, SESSION_EXPIRY_HOURS } from "@decagon/x402";
 import { 
   ReceiptsStore, 
+  ChallengesStore,
   Clock, 
   IdGen, 
   Logger, 
@@ -15,36 +23,19 @@ import {
   type PaymentProof 
 } from "../capabilities/index.js";
 
-/**
- * Input for verifyPaymentAndIssueSession workflow
- */
 export interface VerifyPaymentInput {
-  /** The challenge being satisfied */
-  readonly challenge: PaymentChallenge;
-
-  /** Proof of payment from the client */
-  readonly proof: PaymentProof;
+  readonly challengeId: string;
+  readonly transactionRef: string;
+  readonly payerAddress: string;
+  /** Existing session token to add credits to (optional) */
+  readonly existingSessionTokenId?: string;
 }
 
-/**
- * Output from verifyPaymentAndIssueSession workflow
- */
 export interface VerifyPaymentOutput {
-  /** Receipt proving the payment */
   readonly receipt: Receipt;
-
-  /** Session token with prepaid credits */
   readonly sessionToken: SessionToken;
 }
 
-/**
- * Default session validity: 24 hours
- */
-const SESSION_VALIDITY_SECONDS = 86400;
-
-/**
- * Create an InvalidPaymentError
- */
 const invalidPayment = (challengeId: string, reason: string): InvalidPaymentError => ({
   _tag: "InvalidPaymentError",
   message: `Invalid payment: ${reason}`,
@@ -54,194 +45,153 @@ const invalidPayment = (challengeId: string, reason: string): InvalidPaymentErro
 });
 
 /**
- * Verify payment and issue session workflow
- * 
- * This is a pure Effect workflow that:
- * 1. Checks if challenge has expired
- * 2. Verifies the payment proof
- * 3. Checks for double-spending
- * 4. Creates receipt and session token
- * 5. Persists both to store
- * 
- * No side effects - all I/O through capability interfaces.
+ * Verify payment and issue/update session with credits
  */
 export const verifyPaymentAndIssueSession = (
   input: VerifyPaymentInput
 ): Effect.Effect<
   VerifyPaymentOutput,
   ApiError,
-  ReceiptsStore | Clock | IdGen | Logger | PaymentVerifier
+  ReceiptsStore | ChallengesStore | Clock | IdGen | Logger | PaymentVerifier
 > =>
   pipe(
-    // Log the request
-    Effect.flatMap(Logger, (logger) =>
-      logger.info("Verifying payment", {
-        challengeId: input.challenge.challengeId,
-        transactionRef: input.proof.transactionRef,
-      })
-    ),
-
-    // Check if challenge has expired
-    Effect.flatMap(() =>
-      Effect.flatMap(Clock, (clock) => clock.isPast(input.challenge.expiresAt))
-    ),
-    Effect.flatMap((isExpired) =>
-      isExpired
-        ? Effect.fail(invalidPayment(input.challenge.challengeId, "Challenge has expired"))
-        : Effect.succeed(undefined)
+    // Get and validate challenge
+    Effect.flatMap(ChallengesStore, (store) => store.get(input.challengeId)),
+    Effect.flatMap((challenge) =>
+      Effect.flatMap(Clock, (clock) => clock.isPast(challenge.expiresAt)).pipe(
+        Effect.flatMap((isExpired) => {
+          if (isExpired) {
+            return Effect.fail(invalidPayment(input.challengeId, "Challenge has expired"));
+          }
+          if (challenge.status !== "pending") {
+            return Effect.fail(invalidPayment(input.challengeId, `Challenge already ${challenge.status}`));
+          }
+          return Effect.succeed(challenge);
+        })
+      )
     ),
 
     // Check for double-spending
-    Effect.flatMap(() =>
+    Effect.tap(() =>
       Effect.flatMap(PaymentVerifier, (verifier) =>
-        verifier.isTransactionUsed(input.proof.transactionRef)
+        verifier.isTransactionUsed(input.transactionRef)
+      ).pipe(
+        Effect.flatMap((isUsed) =>
+          isUsed
+            ? Effect.fail(invalidPayment(input.challengeId, "Transaction already used"))
+            : Effect.succeed(undefined)
+        )
       )
     ),
-    Effect.flatMap((isUsed) =>
-      isUsed
-        ? Effect.fail(invalidPayment(input.challenge.challengeId, "Transaction already used"))
-        : Effect.succeed(undefined)
-    ),
 
-    // Verify the payment
-    Effect.flatMap(() =>
+    // Verify the payment (mock for now)
+    Effect.flatMap((challenge) =>
       Effect.flatMap(PaymentVerifier, (verifier) =>
-        verifier.verify(input.challenge, input.proof)
+        verifier.verify(challenge, {
+          transactionRef: input.transactionRef,
+          payerAddress: input.payerAddress,
+          chain: challenge.chain,
+        })
+      ).pipe(
+        Effect.flatMap((result) =>
+          result.valid
+            ? Effect.succeed({ challenge, result })
+            : Effect.fail(invalidPayment(input.challengeId, result.errorMessage ?? "Verification failed"))
+        )
       )
     ),
-    Effect.flatMap((result) =>
-      result.valid
-        ? Effect.succeed(result)
-        : Effect.fail(invalidPayment(input.challenge.challengeId, result.errorMessage ?? "Verification failed"))
+
+    // Mark challenge as paid and transaction as used
+    Effect.tap(({ challenge }) =>
+      Effect.all([
+        Effect.flatMap(ChallengesStore, (store) => store.markPaid(challenge.challengeId)),
+        Effect.flatMap(PaymentVerifier, (verifier) => verifier.markTransactionUsed(input.transactionRef)),
+      ])
     ),
 
-    // Generate IDs and timestamps
-    Effect.flatMap((verificationResult) =>
+    // Generate IDs and create receipt + session
+    Effect.flatMap(({ challenge, result }) =>
       Effect.all({
-        verificationResult: Effect.succeed(verificationResult),
         receiptId: Effect.flatMap(IdGen, (idGen) => idGen.receiptId()),
-        sessionTokenId: Effect.flatMap(IdGen, (idGen) => idGen.sessionTokenId()),
+        sessionTokenId: input.existingSessionTokenId 
+          ? Effect.succeed(input.existingSessionTokenId)
+          : Effect.flatMap(IdGen, (idGen) => idGen.sessionTokenId()),
         now: Effect.flatMap(Clock, (clock) => clock.now()),
-        sessionExpiry: Effect.flatMap(Clock, (clock) =>
-          clock.futureSeconds(SESSION_VALIDITY_SECONDS)
-        ),
+        sessionExpiry: Effect.flatMap(Clock, (clock) => clock.futureHours(SESSION_EXPIRY_HOURS)),
+        challenge: Effect.succeed(challenge),
+        verifiedAmount: Effect.succeed(result.verifiedAmount),
       })
     ),
 
     // Create receipt and session
-    Effect.flatMap(({ verificationResult, receiptId, sessionTokenId, now, sessionExpiry }) => {
+    Effect.flatMap(({ receiptId, sessionTokenId, now, sessionExpiry, challenge, verifiedAmount }) => {
       const receipt: Receipt = {
         receiptId,
-        challengeId: input.challenge.challengeId,
-        resourceId: input.challenge.resourceId,
-        amountPaid: verificationResult.verifiedAmount,
-        currency: input.challenge.currency,
-        transactionRef: input.proof.transactionRef,
-        verifiedAt: verificationResult.verifiedAt,
-        expiresAt: sessionExpiry, // Receipt expires with session
+        challengeId: challenge.challengeId,
+        resourceId: challenge.resourceId,
+        amountPaid: verifiedAmount,
+        currency: challenge.currency,
+        transactionRef: input.transactionRef,
+        verifiedAt: now,
+        expiresAt: sessionExpiry,
+        creditsPurchased: TOPUP_CREDITS,
+        status: "confirmed",
       };
 
       const sessionToken: SessionToken = {
         tokenId: sessionTokenId,
-        balance: verificationResult.verifiedAmount,
-        currency: input.challenge.currency,
+        credits: TOPUP_CREDITS,
+        currency: challenge.currency,
         createdAt: now,
         expiresAt: sessionExpiry,
         accessCount: 0,
       };
 
-      return Effect.succeed({ receipt, sessionToken });
+      return Effect.succeed({ receipt, sessionToken, isNewSession: !input.existingSessionTokenId });
     }),
 
-    // Mark transaction as used
-    Effect.tap(({ receipt }) =>
-      Effect.flatMap(PaymentVerifier, (verifier) =>
-        verifier.markTransactionUsed(receipt.transactionRef)
-      )
-    ),
-
-    // Persist receipt
+    // Persist receipt and session
     Effect.tap(({ receipt }) =>
       Effect.flatMap(ReceiptsStore, (store) => store.saveReceipt(receipt))
     ),
-
-    // Persist session
-    Effect.tap(({ sessionToken }) =>
-      Effect.flatMap(ReceiptsStore, (store) => store.saveSession(sessionToken))
+    Effect.tap(({ sessionToken, isNewSession }) =>
+      isNewSession
+        ? Effect.flatMap(ReceiptsStore, (store) => store.saveSession(sessionToken))
+        : Effect.flatMap(ReceiptsStore, (store) =>
+            // Add credits to existing session
+            store.addCredits(sessionToken.tokenId, TOPUP_CREDITS)
+          )
     ),
 
     // Log success
     Effect.tap(({ receipt, sessionToken }) =>
       Effect.flatMap(Logger, (logger) =>
-        logger.info("Payment verified, session issued", {
+        logger.info("Payment verified, session updated", {
           receiptId: receipt.receiptId,
           sessionTokenId: sessionToken.tokenId,
-          balance: sessionToken.balance,
+          credits: sessionToken.credits,
         })
       )
-    )
+    ),
+
+    // Return only receipt and sessionToken
+    Effect.map(({ receipt, sessionToken }) => ({ receipt, sessionToken }))
   );
 
 /**
- * Mock verify payment workflow for Step 1
- * 
- * Always succeeds with mock data. For demo purposes only.
+ * Get current balance for a session
  */
-export const mockVerifyPayment = (
-  challengeId: string,
-  resourceId: string
+export const getBalance = (
+  sessionTokenId: string
 ): Effect.Effect<
-  VerifyPaymentOutput,
+  { credits: number; expiresAt: string },
   ApiError,
-  Clock | IdGen | Logger
+  ReceiptsStore | Clock
 > =>
   pipe(
-    // Log the mock request
-    Effect.flatMap(Logger, (logger) =>
-      logger.info("Mock payment verification", { challengeId, resourceId })
-    ),
-
-    // Generate mock IDs and timestamps
-    Effect.flatMap(() =>
-      Effect.all({
-        receiptId: Effect.flatMap(IdGen, (idGen) => idGen.receiptId()),
-        sessionTokenId: Effect.flatMap(IdGen, (idGen) => idGen.sessionTokenId()),
-        now: Effect.flatMap(Clock, (clock) => clock.now()),
-        sessionExpiry: Effect.flatMap(Clock, (clock) =>
-          clock.futureSeconds(SESSION_VALIDITY_SECONDS)
-        ),
-      })
-    ),
-
-    // Create mock receipt and session
-    Effect.map(({ receiptId, sessionTokenId, now, sessionExpiry }): VerifyPaymentOutput => ({
-      receipt: {
-        receiptId,
-        challengeId,
-        resourceId,
-        amountPaid: 100, // Mock amount
-        currency: "USD",
-        transactionRef: `mock_tx_${Date.now()}`,
-        verifiedAt: now,
-        expiresAt: sessionExpiry,
-      },
-      sessionToken: {
-        tokenId: sessionTokenId,
-        balance: 100,
-        currency: "USD",
-        createdAt: now,
-        expiresAt: sessionExpiry,
-        accessCount: 0,
-      },
-    })),
-
-    // Log success
-    Effect.tap(({ receipt, sessionToken }) =>
-      Effect.flatMap(Logger, (logger) =>
-        logger.info("Mock payment verified", {
-          receiptId: receipt.receiptId,
-          sessionTokenId: sessionToken.tokenId,
-        })
-      )
-    )
+    Effect.flatMap(ReceiptsStore, (store) => store.getSession(sessionTokenId)),
+    Effect.map((session) => ({
+      credits: session.credits,
+      expiresAt: session.expiresAt,
+    }))
   );

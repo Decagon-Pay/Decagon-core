@@ -145,11 +145,23 @@ export default function HomePage() {
     <main>
       <section className="hero">
         <div className="container">
-          <h1>🔷 Pay Once, Read Instantly</h1>
-          <p>
-            Access premium content with micro-payments. No subscriptions, no accounts.
-            Just tap, pay, and read.
-          </p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+            <div>
+              <h1>🔷 Pay Once, Read Instantly</h1>
+              <p>
+                Access premium content with micro-payments. No subscriptions, no accounts.
+                Just tap, pay, and read.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+              <Link href="/settings" className="btn btn-sm btn-secondary">
+                ⚙️ Settings
+              </Link>
+              <Link href="/agents" className="btn btn-sm btn-secondary">
+                🤖 Agents
+              </Link>
+            </div>
+          </div>
         </div>
       </section>
 
