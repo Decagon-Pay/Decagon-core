@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import PaymentSheet from "@/components/PaymentSheet";
+import { API_BASE } from "@/lib/config";
 
 interface Article {
   id: string;
@@ -36,6 +37,13 @@ interface PaymentChallenge {
   createdAt: string;
   creditsOffered: number;
   status: string;
+  // Step 4: On-chain payment fields
+  chainId: number;
+  assetType: "NATIVE" | "ERC20";
+  assetSymbol: string;
+  amountWei: string;
+  payeeAddress: string;
+  explorerTxBase: string;
 }
 
 interface PaymentRequiredResponse {
@@ -140,7 +148,7 @@ export default function ArticlePage() {
         headers["Authorization"] = `Bearer ${stored.tokenId}`;
       }
 
-      const res = await fetch(`http://localhost:4000/article/${articleId}`, { headers });
+      const res = await fetch(`${API_BASE}/article/${articleId}`, { headers });
       
       if (res.status === 402) {
         // Payment required - parse challenge
@@ -148,7 +156,7 @@ export default function ArticlePage() {
         setChallenge(data.challenge);
         setHasFullAccess(false);
         // Get article info from somewhere else (list endpoint)
-        const articlesRes = await fetch("http://localhost:4000/articles");
+        const articlesRes = await fetch(`${API_BASE}/articles`);
         if (articlesRes.ok) {
           const articlesData = await articlesRes.json();
           const found = articlesData.articles.find((a: ArticleResponse) => a.article.id === articleId);
@@ -166,7 +174,7 @@ export default function ArticlePage() {
         // Update credits from balance endpoint
         if (stored) {
           try {
-            const balanceRes = await fetch("http://localhost:4000/credits/balance", {
+            const balanceRes = await fetch(`${API_BASE}/credits/balance`, {
               headers: { Authorization: `Bearer ${stored.tokenId}` },
             });
             if (balanceRes.ok) {

@@ -227,9 +227,190 @@ The UsageStore tracks daily spend by subject (user or agent):
 
 | Effect | Purpose | Notes |
 |--------|---------|-------|
-| **PlasmaRpc** | Plasma blockchain RPC | Will verify on-chain transactions |
 | **WalletConnector** | User wallet interaction | For signing transactions |
 | **ConfigStore** | Application configuration | Environment variables, feature flags |
+
+### Step 4A Capabilities (On-Chain Payments)
+
+| Effect | Purpose | Location | Status |
+|--------|---------|----------|--------|
+| **ChainConfigService** | Chain configuration (RPC, chainId, payee) | `packages/core/src/capabilities/chain-config.ts` | Mock + Live |
+| **PlasmaRpc** | Plasma blockchain JSON-RPC | `packages/core/src/capabilities/plasma-rpc.ts` | Mock + Live |
+| **PaymentVerifier** | On-chain transaction verification | `packages/core/src/capabilities/payment-verifier.ts` | Mock + Live |
+
+#### ChainConfigService
+
+```typescript
+export interface ChainConfig {
+  chainId: number;
+  chainName: string;
+  rpcUrl: string;
+  assetType: "NATIVE" | "ERC20";
+  assetSymbol: string;
+  payeeAddress: string;
+  explorerTxBase: string;
+  topupPriceWei: string;
+}
+
+export interface ChainConfigService {
+  readonly getConfig: () => Effect.Effect<ChainConfig, never>;
+}
+```
+
+Provides chain-specific configuration for payment verification:
+- **chainId**: Plasma Testnet (9746)
+- **rpcUrl**: `https://testnet-rpc.plasma.to`
+- **payeeAddress**: Merchant wallet address
+- **explorerTxBase**: `https://testnet.plasmascan.to/tx/`
+
+#### PlasmaRpc
+
+```typescript
+export interface PlasmaRpc {
+  readonly getTransaction: (txHash: string) => Effect.Effect<RpcTransaction | null, ApiError>;
+  readonly getTransactionReceipt: (txHash: string) => Effect.Effect<RpcTransactionReceipt | null, ApiError>;
+  readonly getBlock: (blockNumber: string) => Effect.Effect<RpcBlock | null, ApiError>;
+  readonly getBlockNumber: () => Effect.Effect<string, ApiError>;
+  readonly getChainId: () => Effect.Effect<string, ApiError>;
+}
+```
+
+Low-level JSON-RPC client for Plasma blockchain:
+- **getTransaction**: Fetch tx by hash (eth_getTransactionByHash)
+- **getTransactionReceipt**: Fetch receipt (eth_getTransactionReceipt)
+- **getBlock**: Fetch block by number (eth_getBlockByNumber)
+
+#### PaymentVerifier (Extended for Step 4A)
+
+```typescript
+export interface VerificationResult {
+  valid: boolean;
+  verifiedAmount: number;
+  verifiedAt: string;
+  errorMessage?: string;
+  // Step 4A: On-chain fields
+  txHash?: string;
+  blockNumber?: number;
+  amountWei?: string;
+  amountNative?: string;
+  explorerUrl?: string;
+}
+```
+
+Enhanced with on-chain transaction details:
+- **txHash**: Transaction hash verified
+- **blockNumber**: Block number for confirmation
+- **explorerUrl**: Link to block explorer
+
+### Live Implementations
+
+Step 4A introduces **live implementations** alongside mocks:
+
+```typescript
+// packages/core/src/live/plasma-rpc.ts
+
+export const createLivePlasmaRpc = (rpcUrl: string): PlasmaRpc => ({
+  getTransaction: (txHash) =>
+    Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            method: "eth_getTransactionByHash",
+            params: [txHash],
+            id: 1,
+          }),
+        });
+        const json = await response.json();
+        return json.result;
+      },
+      catch: () => ({
+        _tag: "InternalError",
+        message: "RPC request failed",
+        timestamp: new Date().toISOString(),
+      }),
+    }),
+  // ...
+});
+```
+
+The live PaymentVerifier performs real on-chain verification:
+
+```typescript
+export const createLivePaymentVerifier = (config: ChainConfig): PaymentVerifier => ({
+  verify: (challenge, proof) =>
+    Effect.gen(function* () {
+      // 1. Fetch transaction from chain
+      const tx = yield* Effect.tryPromise(() => 
+        rpcCall("eth_getTransactionByHash", [proof.txHash])
+      );
+
+      // 2. Verify recipient matches
+      if (tx.to?.toLowerCase() !== challenge.payeeAddress.toLowerCase()) {
+        return { valid: false, errorMessage: "Wrong recipient" };
+      }
+
+      // 3. Verify amount >= required
+      const txValueWei = hexToBigInt(tx.value);
+      if (txValueWei < BigInt(challenge.amountWei)) {
+        return { valid: false, errorMessage: "Insufficient amount" };
+      }
+
+      // 4. Verify receipt shows success
+      const receipt = yield* Effect.tryPromise(() =>
+        rpcCall("eth_getTransactionReceipt", [proof.txHash])
+      );
+      if (receipt.status !== "0x1") {
+        return { valid: false, errorMessage: "Transaction reverted" };
+      }
+
+      // 5. Return enriched result
+      return {
+        valid: true,
+        txHash: proof.txHash,
+        blockNumber: hexToNumber(receipt.blockNumber),
+        amountWei: tx.value,
+        amountNative: (Number(txValueWei) / 1e18).toFixed(6),
+        explorerUrl: `${config.explorerTxBase}${proof.txHash}`,
+      };
+    }),
+});
+```
+
+### Retry and Timeout Patterns
+
+For on-chain verification, we use Effect's retry and timeout combinators:
+
+```typescript
+export const createRetryingPaymentVerifier = (config: ChainConfig) => {
+  const base = createLivePaymentVerifier(config);
+  
+  return {
+    verify: (challenge, proof) =>
+      base.verify(challenge, proof).pipe(
+        Effect.retry(
+          Schedule.exponential("500 millis").pipe(
+            Schedule.compose(Schedule.recurs(3))
+          )
+        ),
+        Effect.timeout("30 seconds"),
+        Effect.catchAll(() =>
+          Effect.succeed({
+            valid: false,
+            errorMessage: "Verification timed out",
+          })
+        )
+      ),
+  };
+};
+```
+
+This demonstrates Effect's composable error handling:
+- **Retry**: Exponential backoff (500ms, 1s, 2s) up to 3 times
+- **Timeout**: Fail after 30 seconds
+- **Fallback**: Return invalid result on failure
 
 ## Effect Definitions
 

@@ -1,5 +1,5 @@
 /**
- * Get Article Workflow - Step 2
+ * Get Article Workflow - Step 4
  * 
  * HTTP 402 payment flow:
  * - No session token → 402 with PaymentChallenge
@@ -11,14 +11,14 @@
 import { Effect, pipe } from "effect";
 import type { Article, ArticleResponse, ApiError, PaymentChallenge, PaymentRequiredError, SessionExpiredError } from "@decagon/x402";
 import { CREDITS_PER_UNLOCK, TOPUP_CREDITS, TOPUP_PRICE_CENTS, CHALLENGE_EXPIRY_MINUTES } from "@decagon/x402";
-import { ArticlesStore, ReceiptsStore, ChallengesStore, Clock, IdGen, Logger } from "../capabilities/index.js";
+import { ArticlesStore, ReceiptsStore, ChallengesStore, Clock, IdGen, Logger, ChainConfigService } from "../capabilities/index.js";
 
 export interface GetArticleInput {
   readonly articleId: string;
   readonly sessionTokenId?: string;
 }
 
-type AllCapabilities = ArticlesStore | ReceiptsStore | ChallengesStore | Clock | IdGen | Logger;
+type AllCapabilities = ArticlesStore | ReceiptsStore | ChallengesStore | Clock | IdGen | Logger | ChainConfigService;
 
 const paymentRequired = (challenge: PaymentChallenge): PaymentRequiredError => ({
   _tag: "PaymentRequiredError",
@@ -61,23 +61,32 @@ const createChallengeAndFail = (article: Article): Effect.Effect<never, ApiError
     const idGen = yield* IdGen;
     const clock = yield* Clock;
     const challengesStore = yield* ChallengesStore;
+    const chainConfig = yield* ChainConfigService;
 
     const challengeId = yield* idGen.challengeId();
     const now = yield* clock.now();
     const expiresAt = yield* clock.futureMinutes(CHALLENGE_EXPIRY_MINUTES);
+    const config = yield* chainConfig.getConfig();
 
     const challenge: PaymentChallenge = {
       challengeId,
       resourceId: article.id,
       amountRequired: TOPUP_PRICE_CENTS,
       currency: "USDT",
-      chain: "Plasma",
+      chain: config.chainName,
       description: `Unlock: ${article.title}`,
-      payTo: "0xDecagon_Treasury_Mock",
+      payTo: config.payeeAddress,
       expiresAt,
       createdAt: now,
       creditsOffered: TOPUP_CREDITS,
       status: "pending",
+      // Step 4: On-chain payment fields
+      chainId: config.chainId,
+      assetType: config.assetType,
+      assetSymbol: config.assetSymbol,
+      amountWei: config.topupPriceWei,
+      payeeAddress: config.payeeAddress,
+      explorerTxBase: config.explorerTxBase,
     };
 
     yield* challengesStore.save(challenge);

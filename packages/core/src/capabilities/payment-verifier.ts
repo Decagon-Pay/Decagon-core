@@ -1,9 +1,8 @@
 /**
- * PaymentVerifier Capability - Step 2
+ * PaymentVerifier Capability - Step 4
  * 
  * Interface for verifying payments.
- * This is an effect boundary - future implementations will verify on-chain transactions.
- * For now, this is a mock that always succeeds.
+ * Step 4 adds real on-chain verification via RPC.
  */
 
 import { Context, Effect } from "effect";
@@ -15,6 +14,9 @@ import type { PaymentChallenge, ApiError } from "@decagon/x402";
 export interface PaymentProof {
   /** Transaction hash/reference */
   readonly transactionRef: string;
+
+  /** Transaction hash (Step 4: actual txHash for on-chain verification) */
+  readonly txHash?: string;
 
   /** Payer wallet address */
   readonly payerAddress: string;
@@ -30,7 +32,7 @@ export interface VerificationResult {
   /** Whether the payment is valid */
   readonly valid: boolean;
 
-  /** Verified amount (may differ from claimed) */
+  /** Verified amount in cents (may differ from claimed) */
   readonly verifiedAmount: number;
 
   /** Verification timestamp */
@@ -38,6 +40,28 @@ export interface VerificationResult {
 
   /** Error message if invalid */
   readonly errorMessage?: string;
+
+  // Step 4: On-chain verification fields
+  /** Transaction hash */
+  readonly txHash?: string;
+
+  /** Block number where tx was confirmed */
+  readonly blockNumber?: number;
+
+  /** Amount in wei as string */
+  readonly amountWei?: string;
+
+  /** Amount in native token display (e.g., "0.0001 XPL") */
+  readonly amountNative?: string;
+
+  /** Payer address */
+  readonly payerAddress?: string;
+
+  /** Payee address */
+  readonly payeeAddress?: string;
+
+  /** Full explorer URL for the transaction */
+  readonly explorerUrl?: string;
 }
 
 /**

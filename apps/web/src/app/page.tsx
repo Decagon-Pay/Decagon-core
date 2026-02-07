@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { API_BASE } from "@/lib/config";
 
 interface Article {
   id: string;
@@ -123,7 +124,7 @@ export default function HomePage() {
   useEffect(() => {
     async function fetchArticles() {
       try {
-        const res = await fetch("http://localhost:4000/articles");
+        const res = await fetch(`${API_BASE}/articles`);
         if (res.ok) {
           const data = await res.json();
           setArticles(data.articles);

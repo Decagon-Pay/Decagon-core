@@ -1,5 +1,5 @@
 /**
- * Mock Implementations - Step 3
+ * Mock Implementations - Step 4
  * 
  * In-memory mock implementations of all capabilities.
  * For development and testing purposes only.
@@ -19,8 +19,15 @@ import {
   IdGen, 
   Logger,
   PaymentVerifier,
+  ChainConfigService,
+  PlasmaRpc,
+  rpcError,
   type PaymentProof,
-  type VerificationResult
+  type VerificationResult,
+  type ChainConfig,
+  type RpcTransaction,
+  type RpcTransactionReceipt,
+  type RpcBlock
 } from "../capabilities/index.js";
 
 // ============================================
@@ -504,6 +511,72 @@ export const MockUsageStore = Layer.succeed(
 );
 
 // ============================================
+// Mock ChainConfig - Step 4
+// ============================================
+
+const DEFAULT_CHAIN_CONFIG: ChainConfig = {
+  chainId: 9746,
+  chainName: "Plasma Testnet",
+  rpcUrl: process.env["PLASMA_RPC_URL"] ?? "https://testnet-rpc.plasma.to",
+  assetType: "NATIVE",
+  assetSymbol: "XPL",
+  assetDecimals: 18,
+  payeeAddress: process.env["PAYEE_ADDRESS"] ?? "0x85F491cB77b4e83b49dE62D3fd03e6b2622CbE3d",
+  explorerTxBase: process.env["PLASMA_EXPLORER_TX_BASE"] ?? "https://testnet.plasmascan.to/tx/",
+  topupPriceWei: process.env["TOPUP_PRICE_WEI"] ?? "100000000000000", // 0.0001 XPL
+  topupPriceDisplay: process.env["TOPUP_PRICE_XPL"] ?? "0.0001",
+};
+
+export const MockChainConfig = Layer.succeed(
+  ChainConfigService,
+  ChainConfigService.of({
+    getConfig: () => Effect.succeed(DEFAULT_CHAIN_CONFIG),
+  })
+);
+
+// ============================================
+// Mock PlasmaRpc - Step 4 (for testing only)
+// ============================================
+
+// Mock transaction database for testing
+const mockTransactions = new Map<string, RpcTransaction>();
+const mockReceipts = new Map<string, RpcTransactionReceipt>();
+
+export const MockPlasmaRpc = Layer.succeed(
+  PlasmaRpc,
+  PlasmaRpc.of({
+    getTransaction: (txHash: string) =>
+      Effect.succeed(mockTransactions.get(txHash) ?? null),
+
+    getTransactionReceipt: (txHash: string) =>
+      Effect.succeed(mockReceipts.get(txHash) ?? null),
+
+    getBlock: (_blockNumber: string | "latest") =>
+      Effect.succeed({
+        number: "0x100",
+        hash: "0xmockblockhash",
+        timestamp: `0x${Math.floor(Date.now() / 1000).toString(16)}`,
+        parentHash: "0x0",
+        miner: "0x0",
+        gasUsed: "0x0",
+        gasLimit: "0x1000000",
+      } as RpcBlock),
+
+    getBlockNumber: () =>
+      Effect.succeed("0x100"),
+
+    getChainId: () =>
+      Effect.succeed("0x2612"), // 9746 in hex
+  })
+);
+
+// Helper to add mock transactions for testing
+export const addMockTransaction = (tx: RpcTransaction, receipt: RpcTransactionReceipt): void => {
+  mockTransactions.set(tx.hash, tx);
+  mockReceipts.set(receipt.transactionHash, receipt);
+};
+
+// ============================================
 // Combined Mock Layer
 // ============================================
 
@@ -521,5 +594,8 @@ export const MockCapabilities = Layer.mergeAll(
   MockClock,
   MockIdGen,
   MockLogger,
-  MockPaymentVerifier
+  MockPaymentVerifier,
+  // Step 4: Chain integration
+  MockChainConfig,
+  MockPlasmaRpc
 );

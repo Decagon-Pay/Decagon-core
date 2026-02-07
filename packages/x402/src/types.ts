@@ -26,6 +26,7 @@ export const CHALLENGE_EXPIRY_MINUTES = 10;
 export interface PaymentChallenge {
   readonly challengeId: string;
   readonly resourceId: string;
+  /** Amount in cents for display purposes */
   readonly amountRequired: number;
   readonly currency: string;
   readonly chain: string;
@@ -35,6 +36,20 @@ export interface PaymentChallenge {
   readonly createdAt: string;
   readonly creditsOffered: number;
   readonly status: "pending" | "paid" | "expired";
+  
+  // Step 4: On-chain payment fields
+  /** Chain ID for the payment network (e.g., 9746 for Plasma Testnet) */
+  readonly chainId: number;
+  /** Asset type: "NATIVE" for native token, "ERC20" for tokens */
+  readonly assetType: "NATIVE" | "ERC20";
+  /** Asset symbol (e.g., "XPL" for Plasma native token) */
+  readonly assetSymbol: string;
+  /** Amount in wei (smallest unit) as string to avoid precision issues */
+  readonly amountWei: string;
+  /** Address to receive payment */
+  readonly payeeAddress: string;
+  /** Base URL for transaction explorer (e.g., "https://testnet.plasmascan.to/tx/") */
+  readonly explorerTxBase: string;
 }
 
 // ============================================
@@ -109,6 +124,20 @@ export interface Receipt {
   readonly expiresAt: string;
   readonly creditsPurchased: number;
   readonly status: "confirmed" | "pending";
+  
+  // Step 4: On-chain receipt fields
+  /** Transaction hash on the blockchain */
+  readonly txHash?: string;
+  /** Full explorer URL for the transaction */
+  readonly explorerUrl?: string;
+  /** Block number where tx was confirmed */
+  readonly blockNumber?: number;
+  /** Amount in native token (e.g., "0.0001 XPL") */
+  readonly amountNative?: string;
+  /** Payer's wallet address */
+  readonly payerAddress?: string;
+  /** Payee's wallet address */
+  readonly payeeAddress?: string;
 }
 
 // ============================================

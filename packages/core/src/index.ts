@@ -15,5 +15,8 @@ export * from "./workflows/index.js";
 // Re-export mock implementations
 export * from "./mocks/index.js";
 
+// Re-export live implementations (Step 4)
+export * from "./live/index.js";
+
 // Re-export policy functions
 export * from "./policy/index.js";

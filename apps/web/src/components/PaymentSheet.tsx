@@ -1,6 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { API_BASE, PLASMA_CHAIN_ID, PLASMA_EXPLORER_TX_BASE } from "@/lib/config";
+
+// Chain configuration derived from config
+const PLASMA_CHAIN_ID_HEX = `0x${PLASMA_CHAIN_ID.toString(16)}`;
 
 interface PaymentChallenge {
   challengeId: string;
@@ -14,6 +18,13 @@ interface PaymentChallenge {
   createdAt: string;
   creditsOffered: number;
   status: string;
+  // Step 4: On-chain payment fields
+  chainId: number;
+  assetType: "NATIVE" | "ERC20";
+  assetSymbol: string;
+  amountWei: string;
+  payeeAddress: string;
+  explorerTxBase: string;
 }
 
 interface SpendPolicy {
@@ -39,16 +50,34 @@ interface PolicyCheckResult {
   };
 }
 
+interface Receipt {
+  receiptId: string;
+  txHash?: string;
+  explorerUrl?: string;
+  blockNumber?: number;
+  amountNative?: string;
+}
+
 interface PaymentSheetProps {
   challenge: PaymentChallenge;
   onClose: () => void;
-  onSuccess: (receipt: unknown, sessionToken: unknown) => void;
+  onSuccess: (receipt: Receipt, sessionToken: unknown) => void;
   existingSessionTokenId?: string;
 }
 
-type Step = "email" | "policy" | "confirm" | "processing" | "success" | "blocked";
+type Step = "email" | "policy" | "confirm" | "connecting" | "sending" | "confirming" | "success" | "blocked";
 
-const API_BASE = "http://localhost:4000";
+// Declare ethereum provider type
+declare global {
+  interface Window {
+    ethereum?: {
+      isMetaMask?: boolean;
+      request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+      on: (event: string, handler: (...args: unknown[]) => void) => void;
+      removeListener: (event: string, handler: (...args: unknown[]) => void) => void;
+    };
+  }
+}
 
 export default function PaymentSheet({ challenge, onClose, onSuccess, existingSessionTokenId }: PaymentSheetProps) {
   const [step, setStep] = useState<Step>("email");
@@ -58,6 +87,17 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
   const [confirmChecked, setConfirmChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number>(0);
+  
+  // Wallet state
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [hasMetaMask, setHasMetaMask] = useState<boolean>(false);
+  
+  // Check for MetaMask on mount
+  useEffect(() => {
+    setHasMetaMask(typeof window !== "undefined" && !!window.ethereum?.isMetaMask);
+  }, []);
 
   // Load stored email
   useEffect(() => {
@@ -128,8 +168,151 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
     }
   };
 
+  const connectWallet = useCallback(async (): Promise<string | null> => {
+    if (!window.ethereum) {
+      setError("MetaMask not detected. Please install MetaMask.");
+      return null;
+    }
+
+    try {
+      // Request account access
+      const accounts = await window.ethereum.request({
+        method: "eth_requestAccounts",
+      }) as string[];
+
+      if (!accounts || accounts.length === 0) {
+        setError("No accounts found. Please unlock MetaMask.");
+        return null;
+      }
+
+      const address = accounts[0];
+      setWalletAddress(address);
+
+      // Check and switch chain if needed
+      const chainId = await window.ethereum.request({ method: "eth_chainId" }) as string;
+      if (parseInt(chainId, 16) !== PLASMA_CHAIN_ID) {
+        try {
+          await window.ethereum.request({
+            method: "wallet_switchEthereumChain",
+            params: [{ chainId: PLASMA_CHAIN_ID_HEX }],
+          });
+        } catch (switchError: unknown) {
+          // Chain not added, try to add it
+          if ((switchError as { code?: number })?.code === 4902) {
+            await window.ethereum.request({
+              method: "wallet_addEthereumChain",
+              params: [{
+                chainId: PLASMA_CHAIN_ID_HEX,
+                chainName: "Plasma Testnet",
+                nativeCurrency: { name: "XPL", symbol: "XPL", decimals: 18 },
+                rpcUrls: ["https://testnet-rpc.plasma.to"],
+                blockExplorerUrls: ["https://testnet.plasmascan.to"],
+              }],
+            });
+          } else {
+            throw switchError;
+          }
+        }
+      }
+
+      return address;
+    } catch (err) {
+      console.error("Wallet connection failed:", err);
+      setError(`Wallet connection failed: ${(err as Error).message}`);
+      return null;
+    }
+  }, []);
+
+  const sendTransaction = useCallback(async (fromAddress: string): Promise<string | null> => {
+    if (!window.ethereum) return null;
+
+    try {
+      const txHash = await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{
+          from: fromAddress,
+          to: challenge.payeeAddress,
+          value: `0x${BigInt(challenge.amountWei).toString(16)}`,
+          gas: "0x5208", // 21000 for simple transfer
+        }],
+      }) as string;
+
+      return txHash;
+    } catch (err) {
+      console.error("Transaction failed:", err);
+      setError(`Transaction failed: ${(err as Error).message}`);
+      return null;
+    }
+  }, [challenge.payeeAddress, challenge.amountWei]);
+
+  const verifyTransaction = useCallback(async (hash: string): Promise<boolean> => {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (existingSessionTokenId) {
+      headers["Authorization"] = `Bearer ${existingSessionTokenId}`;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/pay/verify`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          txHash: hash,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setReceipt(data.receipt);
+        onSuccess(data.receipt, data.sessionToken);
+        return true;
+      } else {
+        const errData = await res.json();
+        setError(errData.message ?? "Verification failed");
+        return false;
+      }
+    } catch (err) {
+      console.error("Verification failed:", err);
+      setError("Verification failed. Please try again.");
+      return false;
+    }
+  }, [challenge.challengeId, existingSessionTokenId, onSuccess]);
+
   const handlePayment = async () => {
-    setStep("processing");
+    setStep("connecting");
+    setError(null);
+
+    // Step 1: Connect wallet
+    const address = await connectWallet();
+    if (!address) {
+      setStep("confirm");
+      return;
+    }
+
+    // Step 2: Send transaction
+    setStep("sending");
+    const hash = await sendTransaction(address);
+    if (!hash) {
+      setStep("confirm");
+      return;
+    }
+    setTxHash(hash);
+
+    // Step 3: Verify transaction
+    setStep("confirming");
+    const verified = await verifyTransaction(hash);
+    if (verified) {
+      setStep("success");
+    } else {
+      setStep("confirm");
+    }
+  };
+
+  // Legacy mock payment for testing without wallet
+  const handleMockPayment = async () => {
+    setStep("confirming");
     setError(null);
 
     try {
@@ -152,6 +335,7 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
 
       if (res.ok) {
         const data = await res.json();
+        setReceipt(data.receipt);
         setStep("success");
         setTimeout(() => {
           onSuccess(data.receipt, data.sessionToken);
@@ -166,6 +350,12 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
       setError("Payment failed. Please try again.");
       setStep("confirm");
     }
+  };
+
+  // Format Wei to XPL
+  const formatXpl = (wei: string) => {
+    const xpl = Number(BigInt(wei)) / 1e18;
+    return xpl.toFixed(6);
   };
 
   const formatPrice = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -273,12 +463,22 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
                 <span className="payment-value">{challenge.creditsOffered}</span>
               </div>
               <div className="payment-summary-row">
-                <span>Price</span>
-                <span className="payment-value">{formatPrice(challenge.amountRequired)} {challenge.currency}</span>
+                <span>Price (USD)</span>
+                <span className="payment-value">{formatPrice(challenge.amountRequired)}</span>
+              </div>
+              <div className="payment-summary-row">
+                <span>Pay with</span>
+                <span className="payment-value">{formatXpl(challenge.amountWei)} {challenge.assetSymbol}</span>
               </div>
               <div className="payment-summary-row">
                 <span>Chain</span>
                 <span className="payment-value">{challenge.chain}</span>
+              </div>
+              <div className="payment-summary-row">
+                <span>Recipient</span>
+                <span className="payment-value" style={{ fontSize: "0.75rem" }}>
+                  {challenge.payeeAddress?.slice(0, 6)}...{challenge.payeeAddress?.slice(-4)}
+                </span>
               </div>
               <div className="payment-summary-divider" />
               <div className="payment-summary-row">
@@ -307,13 +507,33 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
               </label>
             )}
 
-            <button 
-              className="btn btn-success btn-full" 
-              onClick={handlePayment}
-              disabled={policyResult?.needsConfirm && !confirmChecked}
-            >
-              Pay {formatPrice(challenge.amountRequired)} →
-            </button>
+            {hasMetaMask ? (
+              <button 
+                className="btn btn-success btn-full" 
+                onClick={handlePayment}
+                disabled={(policyResult?.needsConfirm && !confirmChecked)}
+              >
+                🦊 Pay with MetaMask ({formatXpl(challenge.amountWei)} XPL)
+              </button>
+            ) : (
+              <button 
+                className="btn btn-success btn-full" 
+                onClick={handleMockPayment}
+                disabled={policyResult?.needsConfirm && !confirmChecked}
+              >
+                Pay {formatPrice(challenge.amountRequired)} (Demo Mode)
+              </button>
+            )}
+
+            {hasMetaMask && (
+              <button 
+                className="btn btn-secondary btn-full" 
+                onClick={handleMockPayment}
+                disabled={policyResult?.needsConfirm && !confirmChecked}
+              >
+                Skip wallet (Demo Mode)
+              </button>
+            )}
             
             <button className="btn btn-ghost btn-full" onClick={onClose}>
               Cancel
@@ -321,15 +541,60 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
           </div>
         )}
 
-        {/* Step: Processing */}
-        {step === "processing" && (
+        {/* Step: Connecting Wallet */}
+        {step === "connecting" && (
           <div className="payment-sheet-step">
             <div className="spinner-container">
               <div className="spinner"></div>
             </div>
             <p style={{ textAlign: "center", color: "var(--text-secondary)" }}>
-              Processing payment...
+              Connecting wallet...
             </p>
+            <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              Please approve the connection in MetaMask
+            </p>
+          </div>
+        )}
+
+        {/* Step: Sending Transaction */}
+        {step === "sending" && (
+          <div className="payment-sheet-step">
+            <div className="spinner-container">
+              <div className="spinner"></div>
+            </div>
+            <p style={{ textAlign: "center", color: "var(--text-secondary)" }}>
+              Sending transaction...
+            </p>
+            <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              Please confirm the transaction in MetaMask
+            </p>
+            {walletAddress && (
+              <p style={{ textAlign: "center", fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
+                From: {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Step: Confirming on Chain */}
+        {step === "confirming" && (
+          <div className="payment-sheet-step">
+            <div className="spinner-container">
+              <div className="spinner"></div>
+            </div>
+            <p style={{ textAlign: "center", color: "var(--text-secondary)" }}>
+              Confirming on chain...
+            </p>
+            {txHash && (
+              <a 
+                href={`${challenge.explorerTxBase || PLASMA_EXPLORER_TX_BASE}${txHash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: "block", textAlign: "center", fontSize: "0.75rem", color: "var(--primary)", marginTop: "0.5rem" }}
+              >
+                View on Explorer →
+              </a>
+            )}
           </div>
         )}
 
@@ -343,6 +608,38 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
                 You now have {challenge.creditsOffered} credits.
               </p>
             </div>
+
+            {(txHash || receipt?.txHash) && (
+              <div className="receipt-details">
+                <div className="payment-summary-row">
+                  <span>Transaction</span>
+                  <span className="payment-value" style={{ fontSize: "0.75rem" }}>
+                    {(txHash || receipt?.txHash)?.slice(0, 10)}...{(txHash || receipt?.txHash)?.slice(-6)}
+                  </span>
+                </div>
+                {receipt?.blockNumber && (
+                  <div className="payment-summary-row">
+                    <span>Block</span>
+                    <span className="payment-value">#{receipt.blockNumber}</span>
+                  </div>
+                )}
+                {receipt?.amountNative && (
+                  <div className="payment-summary-row">
+                    <span>Amount</span>
+                    <span className="payment-value">{receipt.amountNative}</span>
+                  </div>
+                )}
+                <a 
+                  href={receipt?.explorerUrl || `${challenge.explorerTxBase || PLASMA_EXPLORER_TX_BASE}${txHash || receipt?.txHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn btn-secondary btn-full"
+                  style={{ marginTop: "1rem" }}
+                >
+                  View on Explorer →
+                </a>
+              </div>
+            )}
           </div>
         )}
 
@@ -547,6 +844,13 @@ export default function PaymentSheet({ challenge, onClose, onSuccess, existingSe
           color: var(--primary);
           font-size: 0.875rem;
           margin-top: 1rem;
+        }
+
+        .receipt-details {
+          background: var(--bg-secondary);
+          border-radius: 8px;
+          padding: 1rem;
+          margin-top: 1.5rem;
         }
 
         .payment-sheet-footer {

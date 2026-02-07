@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { API_BASE } from "@/lib/config";
 
 interface SpendPolicy {
   maxPerActionCents: number;
@@ -11,8 +12,6 @@ interface SpendPolicy {
   allowedOrigins: string[];
   allowedPaths: string[];
 }
-
-const API_BASE = "http://localhost:4000";
 
 export default function SettingsPage() {
   const [policy, setPolicy] = useState<SpendPolicy | null>(null);

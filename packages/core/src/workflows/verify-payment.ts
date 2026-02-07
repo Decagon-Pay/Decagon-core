@@ -1,11 +1,11 @@
 /**
- * Verify Payment and Issue Session Workflow - Step 2
+ * Verify Payment and Issue Session Workflow - Step 4
  * 
  * Flow:
  * 1. Validate challenge exists and is not expired
- * 2. Verify payment proof (mock for now)
+ * 2. Verify payment proof (via RPC for on-chain, mock fallback)
  * 3. Mark challenge as paid
- * 4. Create receipt with credits purchased
+ * 4. Create receipt with credits purchased (including on-chain fields)
  * 5. Create or update session with credits
  * 6. Return session token
  */
@@ -25,8 +25,11 @@ import {
 
 export interface VerifyPaymentInput {
   readonly challengeId: string;
-  readonly transactionRef: string;
-  readonly payerAddress: string;
+  /** Legacy transaction reference (for mock payments) */
+  readonly transactionRef?: string;
+  /** Step 4: Actual blockchain transaction hash */
+  readonly txHash?: string;
+  readonly payerAddress?: string;
   /** Existing session token to add credits to (optional) */
   readonly existingSessionTokenId?: string;
 }
@@ -71,25 +74,30 @@ export const verifyPaymentAndIssueSession = (
       )
     ),
 
-    // Check for double-spending
-    Effect.tap(() =>
-      Effect.flatMap(PaymentVerifier, (verifier) =>
-        verifier.isTransactionUsed(input.transactionRef)
+    // Check for double-spending using txHash or transactionRef
+    Effect.tap(() => {
+      const txRef = input.txHash || input.transactionRef;
+      if (!txRef) {
+        return Effect.fail(invalidPayment(input.challengeId, "No transaction reference provided"));
+      }
+      return Effect.flatMap(PaymentVerifier, (verifier) =>
+        verifier.isTransactionUsed(txRef)
       ).pipe(
         Effect.flatMap((isUsed) =>
           isUsed
             ? Effect.fail(invalidPayment(input.challengeId, "Transaction already used"))
             : Effect.succeed(undefined)
         )
-      )
-    ),
+      );
+    }),
 
-    // Verify the payment (mock for now)
+    // Verify the payment (mock for legacy, RPC for txHash)
     Effect.flatMap((challenge) =>
       Effect.flatMap(PaymentVerifier, (verifier) =>
         verifier.verify(challenge, {
-          transactionRef: input.transactionRef,
-          payerAddress: input.payerAddress,
+          transactionRef: input.txHash || input.transactionRef || "",
+          txHash: input.txHash,
+          payerAddress: input.payerAddress || "",
           chain: challenge.chain,
         })
       ).pipe(
@@ -102,12 +110,13 @@ export const verifyPaymentAndIssueSession = (
     ),
 
     // Mark challenge as paid and transaction as used
-    Effect.tap(({ challenge }) =>
-      Effect.all([
+    Effect.tap(({ challenge }) => {
+      const txRef = input.txHash || input.transactionRef || "";
+      return Effect.all([
         Effect.flatMap(ChallengesStore, (store) => store.markPaid(challenge.challengeId)),
-        Effect.flatMap(PaymentVerifier, (verifier) => verifier.markTransactionUsed(input.transactionRef)),
-      ])
-    ),
+        Effect.flatMap(PaymentVerifier, (verifier) => verifier.markTransactionUsed(txRef)),
+      ]);
+    }),
 
     // Generate IDs and create receipt + session
     Effect.flatMap(({ challenge, result }) =>
@@ -119,23 +128,31 @@ export const verifyPaymentAndIssueSession = (
         now: Effect.flatMap(Clock, (clock) => clock.now()),
         sessionExpiry: Effect.flatMap(Clock, (clock) => clock.futureHours(SESSION_EXPIRY_HOURS)),
         challenge: Effect.succeed(challenge),
-        verifiedAmount: Effect.succeed(result.verifiedAmount),
+        verificationResult: Effect.succeed(result),
       })
     ),
 
     // Create receipt and session
-    Effect.flatMap(({ receiptId, sessionTokenId, now, sessionExpiry, challenge, verifiedAmount }) => {
+    Effect.flatMap(({ receiptId, sessionTokenId, now, sessionExpiry, challenge, verificationResult }) => {
       const receipt: Receipt = {
         receiptId,
         challengeId: challenge.challengeId,
         resourceId: challenge.resourceId,
-        amountPaid: verifiedAmount,
+        amountPaid: verificationResult.verifiedAmount,
         currency: challenge.currency,
-        transactionRef: input.transactionRef,
+        transactionRef: input.txHash || input.transactionRef || "",
         verifiedAt: now,
         expiresAt: sessionExpiry,
         creditsPurchased: TOPUP_CREDITS,
         status: "confirmed",
+        // Step 4: On-chain fields
+        txHash: verificationResult.txHash || input.txHash,
+        explorerUrl: verificationResult.explorerUrl || 
+          (input.txHash ? `${challenge.explorerTxBase}${input.txHash}` : undefined),
+        blockNumber: verificationResult.blockNumber,
+        amountNative: verificationResult.amountNative,
+        payerAddress: verificationResult.payerAddress || input.payerAddress,
+        payeeAddress: verificationResult.payeeAddress || challenge.payeeAddress,
       };
 
       const sessionToken: SessionToken = {

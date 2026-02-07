@@ -1,13 +1,17 @@
 /**
- * Decagon API Server - Step 3
+ * Decagon API Server - Step 5
  * 
  * Fastify HTTP server that serves as the edge layer.
  * Implements HTTP 402 payment flow with session tokens, credits, and policy enforcement.
+ * 
+ * Supports two modes:
+ * - Mock mode (default in dev): In-memory stores for quick testing
+ * - SQLite mode (USE_SQLITE=true): Persistent SQLite storage for production
  */
 
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import {
   getArticle,
   listArticles,
@@ -21,9 +25,41 @@ import {
   checkPaymentPolicy,
   recordSpend,
   MockCapabilities,
+  MockArticlesStore,
+  MockChallengesStore,
+  MockClock,
+  MockIdGen,
+  MockLogger,
+  MockPaymentVerifier,
+  MockChainConfig,
+  MockPlasmaRpc,
 } from "@decagon/core";
 import type { ApiError, PaymentRequiredError, SpendPolicy } from "@decagon/x402";
 import { DEFAULT_SPEND_POLICY, TOPUP_PRICE_CENTS } from "@decagon/x402";
+import {
+  LiveReceiptsStore,
+  LivePolicyStore,
+  LiveAgentStore,
+  LiveUsageStore,
+  getDb,
+  closeDb,
+} from "./sqlite/index.js";
+
+// ============================================
+// Environment Configuration
+// ============================================
+
+const USE_SQLITE = process.env["USE_SQLITE"] === "true" || process.env["NODE_ENV"] === "production";
+const PORT = parseInt(process.env["PORT"] ?? "4000", 10);
+const HOST = process.env["HOST"] ?? "0.0.0.0";
+
+// CORS origins
+const ALLOWED_ORIGINS = process.env["ALLOWED_ORIGINS"]
+  ? process.env["ALLOWED_ORIGINS"].split(",").map((s) => s.trim())
+  : ["http://localhost:3000", "http://localhost:3001"];
+
+console.log(`[Config] USE_SQLITE: ${USE_SQLITE}`);
+console.log(`[Config] ALLOWED_ORIGINS: ${ALLOWED_ORIGINS.join(", ")}`);
 
 // ============================================
 // Server Setup
@@ -35,25 +71,57 @@ const server = Fastify({
 
 // Enable CORS for frontend
 await server.register(cors, {
-  origin: ["http://localhost:3000", "http://localhost:3001"],
+  origin: ALLOWED_ORIGINS,
   methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-User-Id"],
   exposedHeaders: ["X-Payment-Required", "X-Challenge-Id"],
 });
+
+// ============================================
+// Capability Layer Selection
+// ============================================
+
+/**
+ * SQLite-backed capabilities for production
+ * Uses SQLite for persistent stores, mock for stateless services
+ */
+const SqliteCapabilities = Layer.mergeAll(
+  MockArticlesStore,        // Articles are static
+  LiveReceiptsStore,        // Persistent
+  MockChallengesStore,      // Short-lived, can be in-memory
+  LivePolicyStore,          // Persistent
+  LiveAgentStore,           // Persistent
+  LiveUsageStore,           // Persistent
+  MockClock,                // Stateless
+  MockIdGen,                // Stateless
+  MockLogger,               // Stateless (could add file logging later)
+  MockPaymentVerifier,      // TODO: Use live verifier for on-chain
+  MockChainConfig,          // Config from env
+  MockPlasmaRpc,            // TODO: Use live RPC
+);
+
+// Choose capabilities based on mode
+const Capabilities = USE_SQLITE ? SqliteCapabilities : MockCapabilities;
+
+// Initialize SQLite if enabled
+if (USE_SQLITE) {
+  console.log("[SQLite] Initializing database...");
+  getDb(); // This creates tables if needed
+}
 
 // ============================================
 // Effect Runtime Helper
 // ============================================
 
 /**
- * Run an Effect workflow with mock capabilities and convert to Promise
+ * Run an Effect workflow with capabilities and convert to Promise
  */
 const runWorkflow = <A, E extends ApiError>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   effect: Effect.Effect<A, E, never> | Effect.Effect<A, E, any>
 ): Promise<{ ok: true; data: A } | { ok: false; error: E }> =>
   Effect.runPromiseExit(
-    Effect.provide(effect as Effect.Effect<A, E, never>, MockCapabilities)
+    Effect.provide(effect as Effect.Effect<A, E, never>, Capabilities)
   ).then((exit) => {
     if (Exit.isSuccess(exit)) {
       return { ok: true as const, data: exit.value };
@@ -222,24 +290,40 @@ server.get<{
 /**
  * Verify payment and issue/update session with credits
  * POST /pay/verify
+ * 
+ * Accepts either:
+ * - txHash: actual blockchain transaction hash (Step 4)
+ * - transactionRef + payerAddress: legacy mock payment
  */
 server.post<{
   Body: {
     challengeId: string;
-    transactionRef: string;
-    payerAddress: string;
+    txHash?: string;
+    transactionRef?: string;
+    payerAddress?: string;
   };
   Headers: { authorization?: string };
 }>("/pay/verify", async (request, reply) => {
-  const { challengeId, transactionRef, payerAddress } = request.body ?? {};
+  const { challengeId, txHash, transactionRef, payerAddress } = request.body ?? {};
 
-  if (!challengeId || !transactionRef || !payerAddress) {
+  if (!challengeId) {
     return reply.status(400).send({
       _tag: "ValidationError",
-      message: "Missing required fields: challengeId, transactionRef, payerAddress",
+      message: "Missing required field: challengeId",
       timestamp: new Date().toISOString(),
       field: "body",
-      reason: "Missing required fields",
+      reason: "Missing challengeId",
+    });
+  }
+
+  // Must have either txHash or transactionRef
+  if (!txHash && !transactionRef) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: txHash or transactionRef",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing payment proof",
     });
   }
 
@@ -249,6 +333,7 @@ server.post<{
   const result = await runWorkflow(
     verifyPaymentAndIssueSession({
       challengeId,
+      txHash,
       transactionRef,
       payerAddress,
       existingSessionTokenId,
@@ -456,17 +541,18 @@ server.get<{
 // Start Server
 // ============================================
 
-const PORT = process.env["PORT"] ? parseInt(process.env["PORT"], 10) : 4000;
-const HOST = process.env["HOST"] ?? "0.0.0.0";
+const serverPort = PORT;
+const serverHost = HOST;
 
 try {
-  await server.listen({ port: PORT, host: HOST });
+  await server.listen({ port: serverPort, host: serverHost });
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   🔷 Decagon API Server (Step 3)                              ║
+║   🔷 Decagon API Server (Step 5)                              ║
 ║                                                               ║
-║   Running at: http://localhost:${PORT}                          ║
+║   Running at: http://localhost:${serverPort}                          ║
+║   Mode: ${USE_SQLITE ? "SQLite (persistent)" : "Mock (in-memory)"}                                  ║
 ║                                                               ║
 ║   HTTP 402 Payment Flow:                                      ║
 ║     GET  /article/:id     → 402 + challenge (no credits)      ║

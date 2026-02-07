@@ -1,18 +1,27 @@
 #!/usr/bin/env npx tsx
 /**
- * Agent Demo Script - Step 3
+ * Agent Demo Script - Step 4A
  * 
- * Demonstrates the HTTP 402 payment flow with policy enforcement.
- * Shows both allowed and blocked payment scenarios.
+ * Demonstrates the HTTP 402 payment flow with policy enforcement
+ * and on-chain payment verification on Plasma Testnet.
  * 
  * Usage:
+ *   # Run the full demo (mock payment for policy parts)
  *   npx tsx scripts/agent-demo.ts
  * 
+ *   # Verify an on-chain payment by txHash
+ *   TX_HASH=0x1234... npx tsx scripts/agent-demo.ts
+ * 
  * Requirements:
- *   - API server running at http://localhost:4000
+ *   - API server running (locally or deployed)
+ * 
+ * Environment Variables:
+ *   - API_BASE: API server URL (default: http://localhost:4000)
+ *   - TX_HASH: Transaction hash to verify on-chain (optional)
  */
 
-const API_BASE = "http://localhost:4000";
+const API_BASE = process.env.API_BASE ?? "http://localhost:4000";
+const PLASMA_EXPLORER = "https://testnet.plasmascan.to";
 
 interface SpendPolicy {
   maxPerActionCents: number;
@@ -42,6 +51,13 @@ interface PaymentChallenge {
   createdAt: string;
   creditsOffered: number;
   status: string;
+  // Step 4A: On-chain fields
+  chainId?: number;
+  assetType?: string;
+  assetSymbol?: string;
+  amountWei?: string;
+  payeeAddress?: string;
+  explorerTxBase?: string;
 }
 
 interface SessionToken {
@@ -51,6 +67,26 @@ interface SessionToken {
   createdAt: string;
   expiresAt: string;
   accessCount: number;
+}
+
+// Step 4A: Receipt with on-chain fields
+interface Receipt {
+  receiptId: string;
+  sessionTokenId: string;
+  challengeId: string;
+  amountVerified: number;
+  currency: string;
+  chain: string;
+  credits: number;
+  timestamp: string;
+  expiresAt: string;
+  // On-chain fields
+  txHash?: string;
+  explorerUrl?: string;
+  blockNumber?: number;
+  amountNative?: string;
+  payerAddress?: string;
+  payeeAddress?: string;
 }
 
 interface PolicyCheckResult {
@@ -93,7 +129,7 @@ async function agentDemo(): Promise<void> {
   console.log(`
 ╔═══════════════════════════════════════════════════════════════════════╗
 ║                                                                       ║
-║   🤖 Decagon Agent Demo - Step 3: Policy Enforcement                  ║
+║   🤖 Decagon Agent Demo - Step 4A: On-Chain Payments                  ║
 ║                                                                       ║
 ║   This script demonstrates:                                           ║
 ║   1. User policy management                                           ║
@@ -101,6 +137,7 @@ async function agentDemo(): Promise<void> {
 ║   3. Policy checks before payments                                    ║
 ║   4. Blocked payments due to policy violations                        ║
 ║   5. Successful payments within policy limits                         ║
+║   6. On-chain payment verification (TX_HASH env var)                  ║
 ║                                                                       ║
 ╚═══════════════════════════════════════════════════════════════════════╝
   `);
@@ -406,12 +443,84 @@ async function agentDemo(): Promise<void> {
   }
 
   // =========================================
+  // Part 6: On-Chain Payment Verification
+  // =========================================
+  console.log("\n" + "=".repeat(60));
+  console.log("PART 6: ON-CHAIN PAYMENT VERIFICATION");
+  console.log("=".repeat(60));
+
+  const txHash = process.env.TX_HASH;
+  
+  if (txHash) {
+    log("STEP 6.1", "🔗 Verifying on-chain payment...");
+    console.log(`\n   Transaction: ${txHash}`);
+    console.log(`   Explorer: ${PLASMA_EXPLORER}/tx/${txHash}`);
+    await sleep(300);
+
+    // First get a challenge for the verification
+    const challengeRes = await fetch(`${API_BASE}/article/article-1`);
+    
+    if (challengeRes.status === 402) {
+      const data = await challengeRes.json();
+      const challenge: PaymentChallenge = data.challenge;
+      
+      log("STEP 6.2", "📋 Got challenge for verification", {
+        challengeId: challenge.challengeId,
+        chainId: challenge.chainId,
+        assetSymbol: challenge.assetSymbol,
+        amountWei: challenge.amountWei,
+        payeeAddress: challenge.payeeAddress,
+      });
+
+      // Verify the on-chain payment
+      log("STEP 6.3", "⛓️  Verifying txHash on Plasma Testnet...");
+      await sleep(300);
+
+      const verifyRes = await fetch(`${API_BASE}/pay/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          txHash: txHash,
+        }),
+      });
+
+      if (verifyRes.ok) {
+        const result = await verifyRes.json();
+        const receipt: Receipt = result.receipt;
+        
+        log("STEP 6.3", "✅ On-chain payment verified!", {
+          receiptId: receipt.receiptId,
+          txHash: receipt.txHash,
+          blockNumber: receipt.blockNumber,
+          amountNative: receipt.amountNative ? `${receipt.amountNative} XPL` : undefined,
+          payerAddress: receipt.payerAddress,
+          payeeAddress: receipt.payeeAddress,
+          explorerUrl: receipt.explorerUrl,
+        });
+
+        if (receipt.explorerUrl) {
+          console.log(`\n   🔗 View transaction: ${receipt.explorerUrl}`);
+        }
+      } else {
+        const error = await verifyRes.json();
+        log("STEP 6.3", "❌ Verification failed", error);
+      }
+    }
+  } else {
+    log("STEP 6.1", "ℹ️  Skipping on-chain verification");
+    console.log("\n   To verify an on-chain payment, run:");
+    console.log(`   TX_HASH=0x1234... npx tsx scripts/agent-demo.ts`);
+    console.log("\n   Or use the web UI at http://localhost:3001 to pay with MetaMask");
+  }
+
+  // =========================================
   // Summary
   // =========================================
   console.log(`
 ╔═══════════════════════════════════════════════════════════════════════╗
 ║                                                                       ║
-║   🎉 Step 3 Demo Complete!                                            ║
+║   🎉 Step 4A Demo Complete!                                           ║
 ║                                                                       ║
 ║   What we demonstrated:                                               ║
 ║                                                                       ║
@@ -420,9 +529,14 @@ async function agentDemo(): Promise<void> {
 ║   ✅ Permissive agent: Created with $1 max (allowed topup)            ║
 ║   ✅ Policy enforcement: Blocked strict agent, allowed user           ║
 ║   ✅ Full 402 flow: GET → 402 → policy check → pay → 200              ║
+║   ${txHash ? "✅" : "⏭️ "} On-chain verification: ${txHash ? "Verified txHash on Plasma" : "Skipped (set TX_HASH)"}             ║
 ║                                                                       ║
-║   The policy system prevents agents from overspending while           ║
-║   allowing legitimate payments within configured limits.              ║
+║   For on-chain payments:                                              ║
+║   1. Open http://localhost:3001 in browser                            ║
+║   2. Click an article to see 402 challenge                            ║
+║   3. Connect MetaMask & pay with XPL on Plasma Testnet                ║
+║   4. Copy the txHash and run:                                         ║
+║      TX_HASH=0x... npx tsx scripts/agent-demo.ts                      ║
 ║                                                                       ║
 ╚═══════════════════════════════════════════════════════════════════════╝
   `);

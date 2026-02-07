@@ -20,3 +20,18 @@ export {
   type PaymentProof,
   type VerificationResult 
 } from "./payment-verifier.js";
+
+// Step 4: Chain integration capabilities
+export { ChainConfigService, type ChainConfig } from "./chain-config.js";
+export { 
+  PlasmaRpc, 
+  type RpcTransaction, 
+  type RpcTransactionReceipt, 
+  type RpcBlock, 
+  type RpcLog,
+  type RpcError,
+  rpcError,
+  hexToNumber,
+  hexToBigInt,
+  numberToHex
+} from "./plasma-rpc.js";

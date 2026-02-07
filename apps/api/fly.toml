@@ -1,0 +1,36 @@
+# Fly.io Configuration for Decagon API
+# Deploy: fly deploy --config apps/api/fly.toml
+
+app = "decagon-api"
+primary_region = "iad"
+
+[build]
+  builder = "heroku/builder:22"
+
+[env]
+  NODE_ENV = "production"
+  USE_SQLITE = "true"
+  DB_PATH = "/data/decagon.db"
+  PORT = "4000"
+  HOST = "0.0.0.0"
+  PLASMA_RPC_URL = "https://testnet-rpc.plasma.to"
+  PLASMA_CHAIN_ID = "9746"
+  PLASMA_EXPLORER_TX_BASE = "https://testnet.plasmascan.to/tx/"
+  PAYEE_ADDRESS = "0x85F491cB77b4e83b49dE62D3fd03e6b2622CbE3d"
+  # Set ALLOWED_ORIGINS via fly secrets set
+
+[http_service]
+  internal_port = 4000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "decagon_data"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
