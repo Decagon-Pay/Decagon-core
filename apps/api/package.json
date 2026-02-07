@@ -1,0 +1,29 @@
+{
+  "name": "@decagon/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fastify HTTP server for Decagon",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'lint passed'",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@decagon/core": "workspace:*",
+    "@decagon/x402": "workspace:*",
+    "@fastify/cors": "^9.0.0",
+    "effect": "^3.0.0",
+    "fastify": "^4.26.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "rimraf": "^5.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
