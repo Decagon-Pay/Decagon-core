@@ -8,8 +8,8 @@ RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# Copy package files + root tsconfig (packages extend it)
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
 COPY packages/x402/package.json packages/x402/
 COPY packages/core/package.json packages/core/
 COPY apps/api/package.json apps/api/
