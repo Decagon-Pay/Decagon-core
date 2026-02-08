@@ -14,6 +14,25 @@ import {
   Newspaper,
 } from "lucide-react";
 import { API_BASE } from "@/lib/config";
+import { motion } from "framer-motion";
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 24 },
+  visible: (i: number) => ({
+    opacity: 1, y: 0,
+    transition: { duration: 0.5, delay: i * 0.1, ease: [0.25, 0.4, 0.25, 1] as const },
+  }),
+};
+
+const staggerContainer = {
+  hidden: {},
+  visible: { transition: { staggerChildren: 0.07 } },
+};
+
+const staggerItem = {
+  hidden: { opacity: 0, y: 20 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.4, 0.25, 1] as const } },
+};
 
 interface Article {
   id: string;
@@ -118,18 +137,22 @@ export default function NewsPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12">
       {/* Header */}
-      <div className="mb-10">
-        <div className="flex items-center gap-2 mb-2">
+      <motion.div
+        initial="hidden" animate="visible"
+        variants={{ hidden: {}, visible: { transition: { staggerChildren: 0.1 } } }}
+        className="mb-10"
+      >
+        <motion.div variants={staggerItem} className="flex items-center gap-2 mb-2">
           <Newspaper className="h-5 w-5 text-primary" />
           <Badge variant="muted">News Demo</Badge>
-        </div>
-        <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+        </motion.div>
+        <motion.h1 variants={staggerItem} className="text-3xl sm:text-4xl font-bold tracking-tight">
           The Decagon Chronicle
-        </h1>
-        <p className="mt-2 text-muted-foreground max-w-xl">
+        </motion.h1>
+        <motion.p variants={staggerItem} className="mt-2 text-muted-foreground max-w-xl">
           Premium articles from independent writers. Pay per article, no subscription, no account.
-        </p>
-      </div>
+        </motion.p>
+      </motion.div>
 
       {loading ? (
         <div className="flex items-center justify-center py-20">
@@ -139,6 +162,7 @@ export default function NewsPage() {
         <>
           {/* Featured article */}
           {featured && (
+            <motion.div initial="hidden" animate="visible" custom={0} variants={fadeUp}>
             <Link href={`/news/${featured.article.id}`} className="group block mb-10 no-underline">
               <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
                 <div className="grid md:grid-cols-5">
@@ -171,13 +195,18 @@ export default function NewsPage() {
                 </div>
               </Card>
             </Link>
+            </motion.div>
           )}
 
           {/* Article grid */}
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <motion.div
+            initial="hidden" animate="visible"
+            variants={staggerContainer}
+            className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6"
+          >
             {rest.map(({ article }) => (
+              <motion.div key={article.id} variants={staggerItem}>
               <Link
-                key={article.id}
                 href={`/news/${article.id}`}
                 className="group no-underline"
               >
@@ -209,8 +238,9 @@ export default function NewsPage() {
                   </CardContent>
                 </Card>
               </Link>
+              </motion.div>
             ))}
-          </div>
+          </motion.div>
         </>
       )}
     </div>

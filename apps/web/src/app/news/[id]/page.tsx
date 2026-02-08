@@ -27,6 +27,15 @@ import {
   CheckCircle2,
   Coins,
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 20 },
+  visible: (i: number) => ({
+    opacity: 1, y: 0,
+    transition: { duration: 0.45, delay: i * 0.08, ease: [0.25, 0.4, 0.25, 1] as const },
+  }),
+};
 
 /* ─── Types ─────────────────────────────────────────── */
 
@@ -91,6 +100,9 @@ interface ReceiptData {
   expiresAt: string;
   creditsPurchased: number;
   status: string;
+  txHash?: string;
+  explorerUrl?: string;
+  payerAddress?: string;
 }
 
 interface SessionToken {
@@ -190,17 +202,49 @@ export default function NewsArticlePage() {
             setCredits(0);
           }
 
-          // Fetch article metadata from list
-          const articlesRes = await fetch(`${API_BASE}/articles`);
-          if (articlesRes.ok) {
-            const articlesData = await articlesRes.json();
-            const found = articlesData.articles.find(
-              (a: ArticleResponse) => a.article.id === articleId
-            );
-            if (found) {
-              setArticle(found.article);
-              setContent(found.content);
+          // Fetch article metadata from list endpoint
+          try {
+            const articlesRes = await fetch(`${API_BASE}/articles`);
+            if (articlesRes.ok) {
+              const articlesData = await articlesRes.json();
+              const found = (articlesData.articles ?? []).find(
+                (a: ArticleResponse) => a.article?.id === articleId
+              );
+              if (found) {
+                setArticle(found.article);
+                setContent(found.content || found.article.preview);
+              } else {
+                // Article not in list — build stub from challenge
+                setArticle({
+                  id: articleId,
+                  title: data.challenge.description?.replace("Unlock: ", "") || "Premium Article",
+                  author: "Unknown",
+                  preview: "This article requires payment to view.",
+                  premiumContent: "",
+                  price: data.challenge.amountRequired,
+                  currency: data.challenge.currency,
+                  publishedAt: data.challenge.createdAt,
+                  readTimeMinutes: 5,
+                  tags: [],
+                });
+                setContent("This article requires payment to view.");
+              }
             }
+          } catch {
+            // List endpoint unreachable — build stub from challenge
+            setArticle({
+              id: articleId,
+              title: data.challenge.description?.replace("Unlock: ", "") || "Premium Article",
+              author: "Unknown",
+              preview: "This article requires payment to view.",
+              premiumContent: "",
+              price: data.challenge.amountRequired,
+              currency: data.challenge.currency,
+              publishedAt: data.challenge.createdAt,
+              readTimeMinutes: 5,
+              tags: [],
+            });
+            setContent("This article requires payment to view.");
           }
         } else if (res.ok) {
           const data: ArticleResponse = await res.json();
@@ -299,6 +343,7 @@ export default function NewsArticlePage() {
       )}
 
       {/* Back */}
+      <motion.div initial="hidden" animate="visible" custom={0} variants={fadeUp}>
       <Link
         href="/news"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-8 no-underline"
@@ -306,9 +351,10 @@ export default function NewsArticlePage() {
         <ArrowLeft className="h-4 w-4" />
         Back to articles
       </Link>
+      </motion.div>
 
       {/* Article header */}
-      <header className="mb-8">
+      <motion.header initial="hidden" animate="visible" custom={1} variants={fadeUp} className="mb-8">
         <div className="flex flex-wrap gap-2 mb-4">
           {article.tags.map((tag) => (
             <Badge key={tag} variant="secondary" className="text-xs">
@@ -332,12 +378,14 @@ export default function NewsArticlePage() {
           </span>
           <span>{formatDate(article.publishedAt)}</span>
         </div>
-      </header>
+      </motion.header>
 
-      <Separator className="mb-8" />
+      <motion.div initial="hidden" animate="visible" custom={2} variants={fadeUp}>
+        <Separator className="mb-8" />
+      </motion.div>
 
       {/* Article body */}
-      <article className="prose prose-slate max-w-none">
+      <motion.article initial="hidden" animate="visible" custom={3} variants={fadeUp} className="prose prose-slate max-w-none">
         {paymentStatus && (
           <div className="flex items-center gap-2 mb-6 text-sm bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3">
             <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
@@ -381,10 +429,15 @@ export default function NewsArticlePage() {
             </div>
           </>
         )}
-      </article>
+      </motion.article>
 
       {/* Unlock CTA */}
       {!hasFullAccess && challenge && (
+        <motion.div
+          initial={{ opacity: 0, y: 30, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.5, delay: 0.35, ease: [0.25, 0.4, 0.25, 1] as [number, number, number, number] }}
+        >
         <Card className="mt-10 border-primary/20 bg-primary/[0.03]">
           <CardContent className="p-6 sm:p-8 text-center">
             <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
@@ -414,10 +467,18 @@ export default function NewsArticlePage() {
             </Button>
           </CardContent>
         </Card>
+        </motion.div>
       )}
 
       {/* Receipt */}
+      <AnimatePresence>
       {receipt && (
+        <motion.div
+          initial={{ opacity: 0, y: 20, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.45, ease: [0.25, 0.4, 0.25, 1] as [number, number, number, number] }}
+        >
         <Card className="mt-8 border-emerald-200 dark:border-emerald-900">
           <CardContent className="p-6">
             <div className="flex items-center gap-2 mb-4">
@@ -454,6 +515,26 @@ export default function NewsArticlePage() {
                   {receipt.transactionRef}
                 </span>
               </div>
+              {receipt.txHash && (
+                <div className="flex justify-between items-center">
+                  <span className="text-muted-foreground">On-chain Tx</span>
+                  {receipt.explorerUrl ? (
+                    <a
+                      href={receipt.explorerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                    >
+                      {receipt.txHash.slice(0, 8)}...{receipt.txHash.slice(-6)}
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  ) : (
+                    <span className="font-mono text-xs max-w-[60%] truncate">
+                      {receipt.txHash}
+                    </span>
+                  )}
+                </div>
+              )}
               {sessionToken && (
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">
@@ -468,7 +549,9 @@ export default function NewsArticlePage() {
             </div>
           </CardContent>
         </Card>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* Payment Sheet */}
       {showPaymentSheet && challenge && (

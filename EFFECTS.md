@@ -195,16 +195,34 @@ export const getArticle = (input: GetArticleInput) =>
 
 ```typescript
 export const verifyPaymentAndIssueSession = (input: VerifyPaymentInput) =>
-  pipe(
-    Effect.flatMap(ChallengesStore, (store) => store.get(input.challengeId)),
-    Effect.flatMap(validateNotExpired),
-    Effect.tap(checkDoubleSpend(input)),
-    Effect.flatMap(verifyPayment(input)),
-    Effect.tap(markPaidAndUsed(input)),
-    Effect.flatMap(generateReceiptAndSession(input)),
-    Effect.tap(persist),
-    Effect.map(({ receipt, sessionToken }) => ({ receipt, sessionToken }))
-  );
+  Effect.gen(function* () {
+    const receiptsStore = yield* ReceiptsStore;
+    const challengesStore = yield* ChallengesStore;
+    const paymentVerifier = yield* PaymentVerifier;
+
+    // Step 1: Idempotency — if receipt already exists for this txRef, return it
+    const existing = yield* receiptsStore.getReceiptByTxRef(txRef);
+    if (existing) return rehydrateSession(existing);
+
+    // Step 2: Validate challenge (not expired, not already paid)
+    const challenge = yield* challengesStore.get(input.challengeId);
+
+    // Step 3: Double-spend guard on txRef
+    const isUsed = yield* paymentVerifier.isTransactionUsed(txRef);
+
+    // Step 4: Verify on-chain (or mock)
+    const result = yield* paymentVerifier.verify(challenge, proof);
+
+    // Step 5: Mark paid + used (atomically)
+    yield* challengesStore.markPaid(challenge.challengeId);
+    yield* paymentVerifier.markTransactionUsed(txRef);
+
+    // Step 6: Build receipt + session
+    yield* receiptsStore.saveReceipt(receipt);
+    yield* receiptsStore.saveSession(sessionToken);
+
+    return { receipt, sessionToken };
+  });
 ```
 
 ### `createTransfer`

@@ -129,7 +129,7 @@ export const verifyPaymentAndIssueSession = (
         const existingByChallenge = yield* Effect.either(
           receiptsStore.getReceiptByChallenge(challenge.challengeId)
         );
-        if (existingByChallenge._tag === "Right") {
+        if (existingByChallenge._tag === "Right" && existingByChallenge.right) {
           const rec = existingByChallenge.right;
           const sessionTokenId = input.existingSessionTokenId || rec.receiptId;
           const sessionResult = yield* Effect.either(
