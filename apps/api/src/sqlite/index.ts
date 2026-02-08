@@ -345,6 +345,17 @@ export const LiveReceiptsStore = Layer.succeed(
         catch: (e) => internalError(`Failed to check receipt: ${e}`),
       }),
 
+    getReceiptByChallenge: (challengeId: string) =>
+      Effect.try({
+        try: () => {
+          const db = getDb();
+          const stmt = db.prepare("SELECT * FROM receipts WHERE challenge_id = ? LIMIT 1");
+          const row = stmt.get(challengeId) as DbRow | undefined;
+          return row ? rowToReceipt(row) : null;
+        },
+        catch: (e) => internalError(`Failed to look up receipt by challenge: ${e}`),
+      }),
+
     getReceiptByTxRef: (txRef: string) =>
       Effect.try({
         try: () => {

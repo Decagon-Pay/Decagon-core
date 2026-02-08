@@ -61,7 +61,7 @@ Best practices for maximising conversion include: keeping the payment sheet unde
     id: "article-2",
     title: "HTTP 402: The Forgotten Status Code",
     author: "Marcus Williams",
-    preview: "When HTTP status codes were designed, 402 was reserved for 'Payment Required' — but it was never properly defined. Decades later, we finally have the technology to make it useful...",
+    preview: "When HTTP status codes were designed, 402 was reserved for 'Payment Required', but it was never properly defined. Decades later, we finally have the technology to make it useful...",
     premiumContent: `A deep dive into the history of HTTP 402, from its origins in RFC 2616 to modern implementations.
 
 When Tim Berners-Lee and the early IETF working group drafted the original HTTP status codes in the early 1990s, they included a curious placeholder: 402 Payment Required. The RFC noted it was "reserved for future use" — an acknowledgement that the web would one day need a native payment layer, but that the technology wasn't ready.
@@ -209,7 +209,7 @@ We distilled these findings into the Decagon PaymentSheet component, which imple
     id: "article-8",
     title: "The Legal Landscape of Onchain Payments",
     author: "James Hartley",
-    preview: "As onchain payments go mainstream, regulators are paying attention. We break down the current legal frameworks across the US, EU, and Asia — and what's coming next...",
+    preview: "As onchain payments go mainstream, regulators are paying attention. We break down the current legal frameworks across the US, EU, and Asia, and what's coming next...",
     premiumContent: `A comprehensive overview of the regulatory landscape for onchain micro-payments.
 
 The legal status of stablecoin payments varies dramatically by jurisdiction. In the United States, stablecoins are treated as "money transmission" in most states, requiring publishers who accept them to either use a licensed payment processor or obtain their own money transmitter license. However, the 2025 Stablecoin TRUST Act created a federal framework that exempts transactions under $100 from most reporting requirements — a critical carve-out for micro-payments.
@@ -403,6 +403,11 @@ export const MockReceiptsStore = Layer.succeed(
     hasReceiptForChallenge: (challengeId: string) =>
       Effect.succeed(
         Array.from(receiptsDb.values()).some((r) => r.challengeId === challengeId)
+      ),
+
+    getReceiptByChallenge: (challengeId: string) =>
+      Effect.succeed(
+        Array.from(receiptsDb.values()).find((r) => r.challengeId === challengeId) ?? null
       ),
 
     getReceiptByTxRef: (txRef: string) =>

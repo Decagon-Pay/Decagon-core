@@ -139,7 +139,7 @@ export default function ArticlePage() {
     }
   }, []);
 
-  // Fetch article — accepts an optional sessionOverride to avoid stale closure / localStorage race
+  // Fetch article: accepts an optional sessionOverride to avoid stale closure / localStorage race
   const fetchArticle = useCallback(async (sessionOverride?: SessionToken) => {
     try {
       const headers: Record<string, string> = {};
@@ -216,7 +216,7 @@ export default function ArticlePage() {
     setCredits(newSession.credits);
     storeSession(newSession);
     setShowPaymentSheet(false);
-    // Refetch article with new session — pass directly to avoid stale closure
+    // Refetch article with new session (pass directly to avoid stale closure)
     setLoading(true);
     fetchArticle(newSession);
   };

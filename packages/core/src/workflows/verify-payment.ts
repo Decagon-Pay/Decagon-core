@@ -2,7 +2,7 @@
  * Verify Payment and Issue Session Workflow
  * 
  * Flow:
- * 1. Idempotency check — if receipt already exists for this txHash, return it
+ * 1. Idempotency check: if receipt already exists for this txHash, return it
  * 2. Validate challenge exists and is not expired
  * 3. Verify payment proof (via RPC for on-chain, mock fallback)
  * 4. Mark challenge as paid
@@ -79,29 +79,37 @@ export const verifyPaymentAndIssueSession = (
     // minting any additional credits.
     const existingReceipt = yield* receiptsStore.getReceiptByTxRef(txRef);
     if (existingReceipt) {
-      yield* logger.info("[verify] idempotency hit — returning existing receipt", {
+      yield* logger.info("[verify] idempotency hit, returning existing receipt", {
         txRef,
         receiptId: existingReceipt.receiptId,
         challengeId: existingReceipt.challengeId,
       });
-      // Return the existing receipt + the session token the caller already has,
-      // or look up the one created during the original verification.
+      // Try to resolve the caller's session on the server.
       const sessionTokenId = input.existingSessionTokenId || existingReceipt.receiptId;
-      // Try to resolve the session; if caller supplied one, return it, otherwise
-      // build a stub from the receipt (credits are already minted).
       const sessionResult = yield* Effect.either(
         receiptsStore.getSession(input.existingSessionTokenId ?? "")
       );
-      const session: SessionToken = sessionResult._tag === "Right"
-        ? sessionResult.right
-        : {
-            tokenId: sessionTokenId,
-            credits: existingReceipt.creditsPurchased,
-            currency: existingReceipt.currency,
-            createdAt: existingReceipt.verifiedAt,
-            expiresAt: existingReceipt.expiresAt,
-            accessCount: 0,
-          };
+
+      let session: SessionToken;
+      if (sessionResult._tag === "Right") {
+        session = sessionResult.right;
+      } else {
+        // Session was lost (server restart, mock mode, etc.).
+        // Re-create it so the caller can actually use the token.
+        session = {
+          tokenId: sessionTokenId,
+          credits: existingReceipt.creditsPurchased,
+          currency: existingReceipt.currency,
+          createdAt: existingReceipt.verifiedAt,
+          expiresAt: existingReceipt.expiresAt,
+          accessCount: 0,
+        };
+        yield* receiptsStore.saveSession(session);
+        yield* logger.info("[verify] idempotency: re-created missing session", {
+          sessionTokenId,
+          credits: session.credits,
+        });
+      }
       return { receipt: existingReceipt, sessionToken: session };
     }
 
@@ -113,12 +121,36 @@ export const verifyPaymentAndIssueSession = (
     if (challenge.status === "paid") {
       const hasReceipt = yield* receiptsStore.hasReceiptForChallenge(challenge.challengeId);
       if (hasReceipt) {
-        yield* logger.info("[verify] challenge already paid — treating as idempotent", {
+        yield* logger.info("[verify] challenge already paid, looking up existing receipt", {
           challengeId: challenge.challengeId, txRef,
         });
-        // We don't have a receipt by txRef (checked above) but the challenge
-        // is paid, so this is a truly duplicate call with a *different* txRef
-        // for the *same* challenge. Reject — one challenge, one payment.
+        // The challenge was already fulfilled. Try to find the existing receipt
+        // and return it so the client gets a usable session instead of a dead-end.
+        const existingByChallenge = yield* Effect.either(
+          receiptsStore.getReceiptByChallenge(challenge.challengeId)
+        );
+        if (existingByChallenge._tag === "Right") {
+          const rec = existingByChallenge.right;
+          const sessionTokenId = input.existingSessionTokenId || rec.receiptId;
+          const sessionResult = yield* Effect.either(
+            receiptsStore.getSession(sessionTokenId)
+          );
+          let session: SessionToken;
+          if (sessionResult._tag === "Right") {
+            session = sessionResult.right;
+          } else {
+            session = {
+              tokenId: sessionTokenId,
+              credits: rec.creditsPurchased,
+              currency: rec.currency,
+              createdAt: rec.verifiedAt,
+              expiresAt: rec.expiresAt,
+              accessCount: 0,
+            };
+            yield* receiptsStore.saveSession(session);
+          }
+          return { receipt: rec, sessionToken: session };
+        }
         return yield* Effect.fail(invalidPayment(input.challengeId, "Challenge already paid"));
       }
     }
@@ -197,16 +229,38 @@ export const verifyPaymentAndIssueSession = (
     // ── Step 7: Persist receipt + session (exactly-once) ───────────
     yield* receiptsStore.saveReceipt(receipt);
 
+    let finalSessionToken = sessionToken;
+
     if (input.existingSessionTokenId) {
-      const before = yield* Effect.either(receiptsStore.getSession(input.existingSessionTokenId));
-      const creditsBefore = before._tag === "Right" ? before.right.credits : 0;
-      yield* receiptsStore.addCredits(input.existingSessionTokenId, TOPUP_CREDITS);
-      yield* logger.info("[verify] credits added to existing session", {
-        sessionTokenId: input.existingSessionTokenId,
-        creditsBefore,
-        creditsAdded: TOPUP_CREDITS,
-        creditsAfter: creditsBefore + TOPUP_CREDITS,
-      });
+      // Check whether the existing session is still valid on the server.
+      // It may have been lost (server restart in mock mode, DB reset, etc.).
+      const existing = yield* Effect.either(
+        receiptsStore.getSession(input.existingSessionTokenId)
+      );
+
+      if (existing._tag === "Right") {
+        // Session exists → add credits and return actual total
+        const updated = yield* receiptsStore.addCredits(input.existingSessionTokenId, TOPUP_CREDITS);
+        finalSessionToken = {
+          ...sessionToken,
+          credits: updated.credits,
+        };
+        yield* logger.info("[verify] credits added to existing session", {
+          sessionTokenId: input.existingSessionTokenId,
+          creditsBefore: existing.right.credits,
+          creditsAdded: TOPUP_CREDITS,
+          creditsAfter: updated.credits,
+        });
+      } else {
+        // Session not found on server → fall back to creating a new session
+        // instead of crashing on addCredits (which would leave the system in
+        // an inconsistent state: challenge paid + receipt saved but no session).
+        yield* receiptsStore.saveSession(sessionToken);
+        yield* logger.info("[verify] existing session not found, created new session", {
+          sessionTokenId: sessionToken.tokenId,
+          credits: TOPUP_CREDITS,
+        });
+      }
     } else {
       yield* receiptsStore.saveSession(sessionToken);
       yield* logger.info("[verify] new session created", {
@@ -221,7 +275,7 @@ export const verifyPaymentAndIssueSession = (
       sessionTokenId,
     });
 
-    return { receipt, sessionToken };
+    return { receipt, sessionToken: finalSessionToken };
   });
 
 /**

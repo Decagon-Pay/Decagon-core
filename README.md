@@ -33,7 +33,7 @@ Both share the same **PaymentSheet** UI component (from `@decagon/ui`), the same
 ### Local Development
 
 ```bash
-git clone https://github.com/your-org/decagon.git
+git clone https://github.com/Decagon-Pay/decagon-core.git
 cd decagon/Decagon-core
 pnpm install
 
@@ -251,11 +251,11 @@ vercel env add NEXT_PUBLIC_API_BASE_URL  # https://decagon-api.fly.dev
 
 | Layer | Tech |
 |-------|------|
-| Type system | [Effect TS](https://effect.website) — typed functional programming |
-| API | [Fastify](https://fastify.dev) — high-performance HTTP |
-| Frontend | [Next.js 14](https://nextjs.org) — App Router |
-| Persistence | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) — embedded SQL |
-| Chain | [Plasma Testnet](https://plasma.to) — EVM L2, chain 9746 |
+| Type system | [Effect TS](https://effect.website) - typed functional programming |
+| API | [Fastify](https://fastify.dev) - high-performance HTTP |
+| Frontend | [Next.js 14](https://nextjs.org) - App Router |
+| Persistence | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) - embedded SQL |
+| Chain | [Plasma Testnet](https://plasma.to) - EVM L2, chain 9746 |
 | Hosting | Fly.io (API) + Vercel (Web) |
 
 ---

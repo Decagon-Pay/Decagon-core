@@ -6,7 +6,7 @@
   "description": "Fastify HTTP server for Decagon",
   "repository": {
     "type": "git",
-    "url": "https://github.com/decagon-protocol/decagon-core.git",
+    "url": "https://github.com/Decagon-Pay/decagon-core.git",
     "directory": "apps/api"
   },
   "type": "module",

@@ -6,7 +6,7 @@
   "description": "Plug-and-play payment UI SDK for Decagon HTTP 402 flows",
   "repository": {
     "type": "git",
-    "url": "https://github.com/decagon-protocol/decagon-core.git",
+    "url": "https://github.com/Decagon-Pay/decagon-core.git",
     "directory": "packages/ui"
   },
   "keywords": ["decagon", "payment-sheet", "http-402", "react", "plasma"],

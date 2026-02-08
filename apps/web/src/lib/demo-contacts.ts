@@ -4,7 +4,7 @@
  * Hardcoded fake users for the remittance demo's "send to contact" flow.
  * Each contact has a display name, fake wallet, and country flag.
  *
- * ⚠️  DEMO MODE — these are not real people or wallets.
+ * ⚠️  DEMO MODE: these are not real people or wallets.
  */
 
 export interface DemoContact {

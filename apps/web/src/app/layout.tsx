@@ -4,7 +4,7 @@ import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 
 export const metadata: Metadata = {
-  title: "Decagon — Stripe Checkout for HTTP 402 on Plasma",
+  title: "Decagon | Stripe Checkout for HTTP 402 on Plasma",
   description:
     "Instant onchain settlement, agent-native spend limits, and receipts. No accounts required.",
 };

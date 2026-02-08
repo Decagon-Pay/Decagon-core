@@ -1,5 +1,5 @@
 /**
- * @decagon/ui — Plug-and-play payment UI SDK
+ * @decagon/ui: Plug-and-play payment UI SDK
  *
  * @example
  * ```tsx

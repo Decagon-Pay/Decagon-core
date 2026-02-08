@@ -104,7 +104,7 @@ const DEMO_POLICY = {
 const QUICK_AMOUNTS = [1000, 2500, 5000, 10000]; // cents
 
 /* ═══════════════════════════════════════════════════════════
-   RemittancePage — Fintech Demo
+   RemittancePage: Fintech Demo
    ═══════════════════════════════════════════════════════════ */
 
 export default function RemittancePage() {
@@ -399,7 +399,7 @@ export default function RemittancePage() {
               <span className="text-gradient">Anywhere, Instantly</span>
             </h1>
             <p className="text-lg sm:text-xl text-white/70 max-w-2xl mx-auto mb-10 leading-relaxed">
-              Experience Decagon&apos;s remittance flow — mock onboarding, demo
+              Experience Decagon&apos;s remittance flow with mock onboarding, demo
               wallet, instant transfers, and spend-policy enforcement. All
               powered by Plasma settlement under the hood.
             </p>
@@ -460,7 +460,7 @@ export default function RemittancePage() {
               {
                 step: "1",
                 title: "Sign In",
-                desc: "Enter any email — we generate a demo wallet and session instantly.",
+                desc: "Enter any email. We generate a demo wallet and session instantly.",
               },
               {
                 step: "2",
@@ -581,7 +581,7 @@ export default function RemittancePage() {
       <div className="flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 mb-6 text-xs text-amber-700">
         <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
         <span>
-          <strong>Demo Mode</strong> — No real money. Balances and transfers are
+          <strong>Demo Mode</strong> &middot; No real money. Balances and transfers are
           simulated.
         </span>
       </div>
@@ -1150,14 +1150,14 @@ export default function RemittancePage() {
                                 tx.resourceId?.replace("transfer:", "") ?? "";
                               return addr
                                 ? `${addr.slice(0, 6)}…${addr.slice(-4)}`
-                                : "—";
+                                : "-";
                             })()}
                           </span>
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
                             <Clock className="h-3 w-3" />
                             {tx.verifiedAt
                               ? new Date(tx.verifiedAt).toLocaleString()
-                              : "—"}
+                              : "-"}
                           </p>
                         </div>
                         <div className="flex items-center gap-2">

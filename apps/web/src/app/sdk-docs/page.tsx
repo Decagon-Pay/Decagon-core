@@ -56,7 +56,7 @@ export default function ArticlePage({ articleId }: { articleId: string }) {
   const payment = useDecagonPayment();
 
   const handleUnlock = async () => {
-    // 1. Fetch the article — API returns a 402 challenge if unpaid
+    // 1. Fetch the article (API returns a 402 challenge if unpaid)
     const res = await fetch(\`\${API_BASE}/article/\${articleId}\`);
     const data = await res.json();
 
@@ -205,7 +205,7 @@ export default function SdkDocsPage() {
         <h1 className="text-3xl font-bold tracking-tight">SDK Documentation</h1>
         <p className="mt-2 text-muted-foreground leading-relaxed">
           Integrate Decagon&apos;s payment sheet into any React application.
-          One component, one hook — that&apos;s it.
+          One component, one hook. That&apos;s it.
         </p>
       </div>
 
@@ -441,7 +441,7 @@ export default function SdkDocsPage() {
                 { n: "2", label: "Policy Check", desc: "SDK calls /policy/check to validate spend limits" },
                 { n: "3", label: "Confirmation", desc: "Summary of amount, chain, recipient with explicit opt-in" },
                 { n: "4", label: "Wallet Signing", desc: "MetaMask prompts for transaction, or demo-mode mock" },
-                { n: "5", label: "On-Chain Verification", desc: "SDK calls /pay/verify — API confirms the tx on Plasma" },
+                { n: "5", label: "On-Chain Verification", desc: "SDK calls /pay/verify and the API confirms the tx on Plasma" },
                 { n: "6", label: "Receipt", desc: "onSuccess fires with receipt + session token" },
               ].map(({ n, label, desc }) => (
                 <div key={n} className="flex items-start gap-3">

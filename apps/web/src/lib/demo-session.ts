@@ -3,9 +3,9 @@
  *
  * Provides mock auth for the remittance fintech demo.
  * Generates a deterministic demo wallet address from the user's email.
- * Stores session in localStorage — purely cosmetic, no real auth.
+ * Stores session in localStorage (purely cosmetic, no real auth).
  *
- * ⚠️  DEMO MODE — not a real authentication system.
+ * ⚠️  DEMO MODE: not a real authentication system.
  */
 
 export interface DemoUser {

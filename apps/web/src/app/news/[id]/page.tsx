@@ -155,6 +155,7 @@ export default function NewsArticlePage() {
   const [receipt, setReceipt] = useState<ReceiptData | null>(null);
   const [sessionToken, setSessionToken] = useState<SessionToken | null>(null);
   const [credits, setCredits] = useState<number>(0);
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = getStoredSession();
@@ -179,6 +180,16 @@ export default function NewsArticlePage() {
           const data: PaymentRequiredResponse = await res.json();
           setChallenge(data.challenge);
           setHasFullAccess(false);
+          setPaymentStatus(null);
+
+          // If we sent a session token but got 402, the session is stale.
+          // Clear it so the user is not stuck.
+          if (session) {
+            localStorage.removeItem(SESSION_KEY);
+            setSessionToken(null);
+            setCredits(0);
+          }
+
           // Fetch article metadata from list
           const articlesRes = await fetch(`${API_BASE}/articles`);
           if (articlesRes.ok) {
@@ -196,6 +207,7 @@ export default function NewsArticlePage() {
           setArticle(data.article);
           setContent(data.content);
           setHasFullAccess(data.hasFullAccess);
+          setChallenge(null);
           if (session) {
             try {
               const balanceRes = await fetch(`${API_BASE}/credits/balance`, {
@@ -226,19 +238,24 @@ export default function NewsArticlePage() {
     fetchArticle();
   }, [fetchArticle]);
 
-  const handlePaymentSuccess = (
+  const handlePaymentSuccess = async (
     receiptData: DecagonReceipt,
     sessionData: unknown
   ) => {
     const newReceipt = receiptData as unknown as ReceiptData;
     const newSession = sessionData as SessionToken;
+
     setReceipt(newReceipt);
     setSessionToken(newSession);
     setCredits(newSession.credits);
     storeSession(newSession);
     setShowPaymentSheet(false);
+    setPaymentStatus("Payment confirmed. Unlocking content...");
+
+    // Force refresh article with the new session
     setLoading(true);
-    fetchArticle(newSession);
+    await fetchArticle(newSession);
+    setPaymentStatus(null);
   };
 
   /* ─── Loading state ─── */
@@ -270,7 +287,7 @@ export default function NewsArticlePage() {
   /* ─── Render ─── */
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 py-10">
-      {/* Credits badge — fixed top right */}
+      {/* Credits badge */}
       {sessionToken && (
         <div className="fixed top-20 right-4 z-50">
           <Badge variant="outline" className="gap-1.5 bg-background shadow-md px-3 py-1.5">
@@ -321,6 +338,15 @@ export default function NewsArticlePage() {
 
       {/* Article body */}
       <article className="prose prose-slate max-w-none">
+        {paymentStatus && (
+          <div className="flex items-center gap-2 mb-6 text-sm bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg px-4 py-3">
+            <Loader2 className="h-4 w-4 animate-spin text-emerald-600" />
+            <span className="text-emerald-700 dark:text-emerald-400 font-medium">
+              {paymentStatus}
+            </span>
+          </div>
+        )}
+
         {hasFullAccess ? (
           <>
             <div className="flex items-center gap-2 mb-6 text-sm">
@@ -366,7 +392,7 @@ export default function NewsArticlePage() {
             </div>
             <h3 className="text-lg font-semibold mb-1">Premium Content</h3>
             <p className="text-sm text-muted-foreground mb-1">
-              HTTP 402 — Payment Required
+              HTTP 402 &middot; Payment Required
             </p>
             <p className="text-sm text-muted-foreground mb-6">
               Top up{" "}

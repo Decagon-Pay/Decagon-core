@@ -4,7 +4,7 @@
  * Tracks a fake USD balance and demo transfer history in localStorage.
  * Enforces the same spend-policy model used by the real Decagon pipeline.
  *
- * ⚠️  DEMO MODE — no real money moves.
+ * ⚠️  DEMO MODE: no real money moves.
  */
 
 export interface DemoTransaction {

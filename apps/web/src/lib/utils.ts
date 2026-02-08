@@ -26,11 +26,11 @@ export function formatDateShort(dateString: string): string {
 }
 
 export function shortenAddress(addr: string): string {
-  if (!addr) return "—";
+  if (!addr) return "-";
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
 export function shortenHash(hash: string): string {
-  if (!hash) return "—";
+  if (!hash) return "-";
   return `${hash.slice(0, 10)}…${hash.slice(-6)}`;
 }

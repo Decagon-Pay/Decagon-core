@@ -120,7 +120,7 @@ export default function AgentsPage() {
         setNewAgentResult(data);
         setMessage({
           type: "success",
-          text: "Agent created! Copy the token below — it won't be shown again.",
+          text: "Agent created! Copy the token below. It won't be shown again.",
         });
         await fetchAgents();
         setShowCreateForm(false);
@@ -220,7 +220,7 @@ export default function AgentsPage() {
             <h3 className="text-lg font-semibold mb-1">🎉 Agent Created!</h3>
             <p className="text-sm text-amber-600 flex items-center gap-1.5 mb-4">
               <AlertTriangle className="h-4 w-4" />
-              Save this token now — it won&apos;t be shown again!
+              Save this token now. It won&apos;t be shown again!
             </p>
 
             {/* Token display */}

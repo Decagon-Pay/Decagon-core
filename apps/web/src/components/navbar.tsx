@@ -66,7 +66,7 @@ export function Navbar() {
             </Link>
           ))}
           <div className={cn("mx-2 h-5 w-px", isLanding ? "bg-white/20" : "bg-border")} />
-          <Link href="https://github.com" target="_blank" rel="noopener noreferrer">
+          <Link href="https://github.com/Decagon-Pay" target="_blank" rel="noopener noreferrer">
             <Button
               variant={isLanding ? "outline" : "default"}
               size="sm"

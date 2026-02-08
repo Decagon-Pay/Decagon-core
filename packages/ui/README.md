@@ -2,7 +2,7 @@
 
 Plug-and-play React payment-sheet SDK for **Decagon HTTP 402** flows.
 
-Drop `<PaymentSheet>` into any React app to add pay-per-use article unlocks, remittance transfers, or agent-token purchases — all settled on Plasma.
+Drop `<PaymentSheet>` into any React app to add pay-per-use article unlocks, remittance transfers, or agent-token purchases, all settled on Plasma.
 
 ---
 
@@ -177,7 +177,7 @@ User clicks "Unlock"
 
 ## Styling
 
-The PaymentSheet renders with BEM-style `dg-*` CSS classes. The host app must provide these styles — see [globals.css](../../apps/web/src/app/globals.css) for the reference implementation using CSS custom properties.
+The PaymentSheet renders with BEM-style `dg-*` CSS classes. The host app must provide these styles. See [globals.css](../../apps/web/src/app/globals.css) for the reference implementation using CSS custom properties.
 
 ---
 

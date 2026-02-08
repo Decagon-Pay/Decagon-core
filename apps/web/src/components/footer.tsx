@@ -14,7 +14,7 @@ export function Footer() {
               <span className="font-bold text-foreground">Decagon</span>
             </Link>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Stripe Checkout for HTTP 402 payments on Plasma.
+              Stripe Checkout for Plasma payments. Instant onchain settlement with HTTP 402.
             </p>
           </div>
 
@@ -55,7 +55,7 @@ export function Footer() {
                 </Link>
               </li>
               <li>
-                <Link href="https://github.com" target="_blank" className="text-muted-foreground hover:text-foreground no-underline transition-colors">
+                <Link href="https://github.com/Decagon-Pay" target="_blank" className="text-muted-foreground hover:text-foreground no-underline transition-colors">
                   GitHub
                 </Link>
               </li>

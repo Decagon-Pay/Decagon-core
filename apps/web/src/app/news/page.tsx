@@ -53,7 +53,7 @@ const FALLBACK_ARTICLES: ArticleResponse[] = [
     hasFullAccess: false, content: "",
   },
   {
-    article: { id: "article-2", title: "HTTP 402: The Forgotten Status Code", author: "Marcus Williams", preview: "When HTTP status codes were designed, 402 was reserved for 'Payment Required' — but it was never properly defined...", price: 75, currency: "USD", publishedAt: "2026-01-20T14:30:00Z", readTimeMinutes: 12, tags: ["http", "protocol", "history"] },
+    article: { id: "article-2", title: "HTTP 402: The Forgotten Status Code", author: "Marcus Williams", preview: "When HTTP status codes were designed, 402 was reserved for 'Payment Required', but it was never properly defined...", price: 75, currency: "USD", publishedAt: "2026-01-20T14:30:00Z", readTimeMinutes: 12, tags: ["http", "protocol", "history"] },
     hasFullAccess: false, content: "",
   },
   {
@@ -127,7 +127,7 @@ export default function NewsPage() {
           The Decagon Chronicle
         </h1>
         <p className="mt-2 text-muted-foreground max-w-xl">
-          Premium articles from independent writers. Pay per article — no subscription, no account.
+          Premium articles from independent writers. Pay per article, no subscription, no account.
         </p>
       </div>
 
@@ -137,7 +137,7 @@ export default function NewsPage() {
         </div>
       ) : (
         <>
-          {/* Featured article — hero card */}
+          {/* Featured article */}
           {featured && (
             <Link href={`/news/${featured.article.id}`} className="group block mb-10 no-underline">
               <Card className="overflow-hidden hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
