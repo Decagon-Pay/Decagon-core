@@ -155,6 +155,9 @@ export default function HomePage() {
               </p>
             </div>
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+              <Link href="/remittance" className="btn btn-sm btn-secondary">
+                💸 Remittance
+              </Link>
               <Link href="/settings" className="btn btn-sm btn-secondary">
                 ⚙️ Settings
               </Link>

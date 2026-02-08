@@ -37,7 +37,6 @@ export interface PaymentChallenge {
   readonly creditsOffered: number;
   readonly status: "pending" | "paid" | "expired";
   
-  // Step 4: On-chain payment fields
   /** Chain ID for the payment network (e.g., 9746 for Plasma Testnet) */
   readonly chainId: number;
   /** Asset type: "NATIVE" for native token, "ERC20" for tokens */
@@ -125,7 +124,6 @@ export interface Receipt {
   readonly creditsPurchased: number;
   readonly status: "confirmed" | "pending";
   
-  // Step 4: On-chain receipt fields
   /** Transaction hash on the blockchain */
   readonly txHash?: string;
   /** Full explorer URL for the transaction */

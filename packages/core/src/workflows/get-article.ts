@@ -1,5 +1,5 @@
 /**
- * Get Article Workflow - Step 4
+ * Get Article Workflow
  * 
  * HTTP 402 payment flow:
  * - No session token → 402 with PaymentChallenge
@@ -80,7 +80,6 @@ const createChallengeAndFail = (article: Article): Effect.Effect<never, ApiError
       createdAt: now,
       creditsOffered: TOPUP_CREDITS,
       status: "pending",
-      // Step 4: On-chain payment fields
       chainId: config.chainId,
       assetType: config.assetType,
       assetSymbol: config.assetSymbol,

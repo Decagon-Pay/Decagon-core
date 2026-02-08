@@ -26,6 +26,7 @@ export default function RootLayout({
             </a>
             <nav>
               <a href="/" style={{ marginRight: "1rem" }}>Marketplace</a>
+              <a href="/remittance" style={{ marginRight: "1rem" }}>Remittance</a>
               <span style={{ color: "var(--text-muted)" }}>|</span>
               <span style={{ marginLeft: "1rem", color: "var(--text-muted)", fontSize: "0.875rem" }}>
                 Balance: $0.00

@@ -1,5 +1,5 @@
 /**
- * Workflows Index - Step 3
+ * Workflows Index
  * 
  * Re-exports all pure Effect workflows.
  */
@@ -30,3 +30,10 @@ export {
   type PolicyCheckRequest,
   type PolicyCheckResponse,
 } from "./policy-workflows.js";
+
+export {
+  createTransfer,
+  verifyTransfer,
+  type CreateTransferInput,
+  type TransferChallenge,
+} from "./remittance.js";

@@ -1,5 +1,5 @@
 /**
- * Verify Payment and Issue Session Workflow - Step 4
+ * Verify Payment and Issue Session Workflow
  * 
  * Flow:
  * 1. Validate challenge exists and is not expired
@@ -27,7 +27,7 @@ export interface VerifyPaymentInput {
   readonly challengeId: string;
   /** Legacy transaction reference (for mock payments) */
   readonly transactionRef?: string;
-  /** Step 4: Actual blockchain transaction hash */
+  /** Blockchain transaction hash for on-chain verification */
   readonly txHash?: string;
   readonly payerAddress?: string;
   /** Existing session token to add credits to (optional) */
@@ -145,7 +145,6 @@ export const verifyPaymentAndIssueSession = (
         expiresAt: sessionExpiry,
         creditsPurchased: TOPUP_CREDITS,
         status: "confirmed",
-        // Step 4: On-chain fields
         txHash: verificationResult.txHash || input.txHash,
         explorerUrl: verificationResult.explorerUrl || 
           (input.txHash ? `${challenge.explorerTxBase}${input.txHash}` : undefined),

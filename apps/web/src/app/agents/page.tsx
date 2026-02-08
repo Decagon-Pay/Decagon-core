@@ -45,7 +45,7 @@ export default function AgentsPage() {
   const [agentName, setAgentName] = useState("My Agent");
   const [maxPerAction, setMaxPerAction] = useState("1.00");
   const [dailyCap, setDailyCap] = useState("5.00");
-  const [allowedPaths, setAllowedPaths] = useState("/article/*");
+  const [allowedPaths, setAllowedPaths] = useState("/article/*, /transfer");
 
   useEffect(() => {
     fetchAgents();
@@ -284,8 +284,14 @@ export default function AgentsPage() {
                 <span>Max: {formatCents(agent.policy.maxPerActionCents)}/action</span>
                 <span>•</span>
                 <span>Cap: {formatCents(agent.policy.dailyCapCents)}/day</span>
-                <span>•</span>
-                <span>Paths: {agent.policy.allowedPaths.join(", ")}</span>
+              </div>
+              <div className="agent-events">
+                {agent.policy.allowedPaths.some((p: string) => p.includes("article")) && (
+                  <span className="event-badge event-article">📄 Articles</span>
+                )}
+                {agent.policy.allowedPaths.some((p: string) => p.includes("transfer") || p === "*") && (
+                  <span className="event-badge event-transfer">💸 Transfers</span>
+                )}
               </div>
               
               <div className="agent-meta">
@@ -489,6 +495,29 @@ export default function AgentsPage() {
           color: var(--text-secondary);
           margin-bottom: 0.5rem;
           flex-wrap: wrap;
+        }
+
+        .agent-events {
+          display: flex;
+          gap: 0.5rem;
+          margin-bottom: 0.5rem;
+        }
+
+        .event-badge {
+          font-size: 0.75rem;
+          padding: 0.2rem 0.5rem;
+          border-radius: 4px;
+          font-weight: 500;
+        }
+
+        .event-article {
+          background: rgba(59, 130, 246, 0.15);
+          color: var(--primary);
+        }
+
+        .event-transfer {
+          background: rgba(16, 185, 129, 0.15);
+          color: var(--success);
         }
 
         .agent-meta {

@@ -21,7 +21,6 @@ export {
   type VerificationResult 
 } from "./payment-verifier.js";
 
-// Step 4: Chain integration capabilities
 export { ChainConfigService, type ChainConfig } from "./chain-config.js";
 export { 
   PlasmaRpc, 

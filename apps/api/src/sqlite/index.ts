@@ -1,5 +1,5 @@
 /**
- * SQLite Persistence Layer - Step 5
+ * SQLite Persistence Layer
  * 
  * Provides persistent storage for:
  * - Receipts

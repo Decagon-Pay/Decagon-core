@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import PaymentSheet from "@/components/PaymentSheet";
-import { API_BASE } from "@/lib/config";
+import { PaymentSheet } from "@decagon/ui";
+import type { DecagonReceipt } from "@decagon/ui";
+import { API_BASE, PLASMA_CHAIN_ID, PLASMA_EXPLORER_TX_BASE } from "@/lib/config";
 
 interface Article {
   id: string;
@@ -37,7 +38,6 @@ interface PaymentChallenge {
   createdAt: string;
   creditsOffered: number;
   status: string;
-  // Step 4: On-chain payment fields
   chainId: number;
   assetType: "NATIVE" | "ERC20";
   assetSymbol: string;
@@ -208,8 +208,8 @@ export default function ArticlePage() {
     setShowPaymentSheet(true);
   };
 
-  const handlePaymentSuccess = (receiptData: unknown, sessionData: unknown) => {
-    const newReceipt = receiptData as Receipt;
+  const handlePaymentSuccess = (receiptData: DecagonReceipt, sessionData: unknown) => {
+    const newReceipt = receiptData as unknown as Receipt;
     const newSession = sessionData as SessionToken;
     setReceipt(newReceipt);
     setSessionToken(newSession);
@@ -366,6 +366,11 @@ export default function ArticlePage() {
       {showPaymentSheet && challenge && (
         <PaymentSheet
           challenge={challenge}
+          config={{
+            apiBase: API_BASE,
+            plasmaChainId: PLASMA_CHAIN_ID,
+            explorerTxBase: PLASMA_EXPLORER_TX_BASE,
+          }}
           onClose={() => setShowPaymentSheet(false)}
           onSuccess={handlePaymentSuccess}
           existingSessionTokenId={sessionToken?.tokenId}

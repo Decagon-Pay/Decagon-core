@@ -1,5 +1,5 @@
 /**
- * Decagon API Server - Step 5
+ * Decagon API Server
  * 
  * Fastify HTTP server that serves as the edge layer.
  * Implements HTTP 402 payment flow with session tokens, credits, and policy enforcement.
@@ -24,6 +24,8 @@ import {
   getAgentByToken,
   checkPaymentPolicy,
   recordSpend,
+  createTransfer,
+  verifyTransfer,
   MockCapabilities,
   MockArticlesStore,
   MockChallengesStore,
@@ -292,7 +294,7 @@ server.get<{
  * POST /pay/verify
  * 
  * Accepts either:
- * - txHash: actual blockchain transaction hash (Step 4)
+ * - txHash: actual blockchain transaction hash
  * - transactionRef + payerAddress: legacy mock payment
  */
 server.post<{
@@ -353,7 +355,7 @@ server.post<{
 });
 
 // ============================================
-// Policy Management Routes - Step 3
+// Policy Management Routes
 // ============================================
 
 /**
@@ -464,7 +466,7 @@ server.post<{
 });
 
 // ============================================
-// Agent Management Routes - Step 3
+// Agent Management Routes
 // ============================================
 
 /**
@@ -538,6 +540,129 @@ server.get<{
 });
 
 // ============================================
+// Transfer / Remittance Routes
+// ============================================
+
+server.post<{
+  Body: {
+    recipientAddress?: string;
+    amountCents?: number;
+    note?: string;
+  };
+  Headers: { "x-user-id"?: string };
+}>("/transfer/create", async (request, reply) => {
+  const userId = getUserId(request);
+  const { recipientAddress, amountCents, note } = request.body ?? {};
+
+  if (!recipientAddress) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: recipientAddress",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing recipientAddress",
+    });
+  }
+
+  const result = await runWorkflow(
+    createTransfer({
+      senderUserId: userId,
+      recipientAddress,
+      amountCents: amountCents ?? TOPUP_PRICE_CENTS,
+      note,
+    })
+  );
+
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+
+  return {
+    status: 402,
+    message: "Payment required to complete transfer",
+    challenge: result.data.challenge,
+    recipientAddress: result.data.recipientAddress,
+    note: result.data.note,
+    acceptedPaymentMethods: [
+      { type: "plasma", name: "XPL on Plasma", available: true },
+    ],
+  };
+});
+
+server.post<{
+  Body: {
+    challengeId: string;
+    txHash?: string;
+    transactionRef?: string;
+    payerAddress?: string;
+  };
+  Headers: { authorization?: string };
+}>("/transfer/verify", async (request, reply) => {
+  const { challengeId, txHash, transactionRef, payerAddress } = request.body ?? {};
+
+  if (!challengeId) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: challengeId",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing challengeId",
+    });
+  }
+
+  if (!txHash && !transactionRef) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: txHash or transactionRef",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing payment proof",
+    });
+  }
+
+  const existingSessionTokenId = extractSessionToken(request.headers.authorization);
+
+  const result = await runWorkflow(
+    verifyTransfer({
+      challengeId,
+      txHash,
+      transactionRef,
+      payerAddress,
+      existingSessionTokenId,
+    })
+  );
+
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+
+  return {
+    success: true,
+    receipt: result.data.receipt,
+    sessionToken: result.data.sessionToken,
+    message: "Transfer verified and confirmed on-chain.",
+  };
+});
+
+server.get<{
+  Headers: { "x-user-id"?: string };
+}>("/transfer/history", async (request, reply) => {
+  if (!USE_SQLITE) {
+    return { transfers: [] };
+  }
+  try {
+    const db = getDb();
+    const userId = getUserId(request);
+    const rows = db.prepare(
+      `SELECT * FROM receipts WHERE resourceId LIKE 'transfer:%' ORDER BY verifiedAt DESC LIMIT 50`
+    ).all() as Array<Record<string, unknown>>;
+    return { transfers: rows };
+  } catch {
+    return { transfers: [] };
+  }
+});
+
+// ============================================
 // Start Server
 // ============================================
 
@@ -549,7 +674,7 @@ try {
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   🔷 Decagon API Server (Step 5)                              ║
+║   🔷 Decagon API Server                                       ║
 ║                                                               ║
 ║   Running at: http://localhost:${serverPort}                          ║
 ║   Mode: ${USE_SQLITE ? "SQLite (persistent)" : "Mock (in-memory)"}                                  ║
@@ -562,14 +687,19 @@ try {
 ║     GET  /credits/balance → Current credit balance            ║
 ║     POST /pay/verify      → Verify payment, get session       ║
 ║                                                               ║
-║   Policy Management (Step 3):                                 ║
+║   Policy Management:                                          ║
 ║     GET  /policy          → Get spend policy                  ║
 ║     POST /policy          → Set spend policy                  ║
 ║     POST /policy/check    → Check if payment allowed          ║
 ║                                                               ║
-║   Agent Management (Step 3):                                  ║
+║   Agent Management:                                           ║
 ║     POST /agent/create    → Create agent token                ║
 ║     GET  /agent/list      → List agents                       ║
+║                                                               ║
+║   Remittance:                                                 ║
+║     POST /transfer/create → Create transfer challenge         ║
+║     POST /transfer/verify → Verify transfer payment           ║
+║     GET  /transfer/history→ Transfer history                  ║
 ║                                                               ║
 ║   Authorization: Bearer <sessionTokenId|agentToken>           ║
 ║   User ID: x-user-id header (default: demo-user)              ║

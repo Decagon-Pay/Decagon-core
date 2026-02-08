@@ -1,5 +1,5 @@
 /**
- * Plasma RPC Capability - Step 4
+ * Plasma RPC Capability
  * 
  * Provides blockchain RPC operations for Plasma network.
  * Abstracted as an Effect capability for testability.

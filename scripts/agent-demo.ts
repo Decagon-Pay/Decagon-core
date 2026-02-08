@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Agent Demo Script - Step 4A
+ * Agent Demo Script
  * 
  * Demonstrates the HTTP 402 payment flow with policy enforcement
  * and on-chain payment verification on Plasma Testnet.
@@ -51,7 +51,7 @@ interface PaymentChallenge {
   createdAt: string;
   creditsOffered: number;
   status: string;
-  // Step 4A: On-chain fields
+  // On-chain payment fields
   chainId?: number;
   assetType?: string;
   assetSymbol?: string;
@@ -69,7 +69,7 @@ interface SessionToken {
   accessCount: number;
 }
 
-// Step 4A: Receipt with on-chain fields
+// Receipt with on-chain fields
 interface Receipt {
   receiptId: string;
   sessionTokenId: string;
@@ -129,7 +129,7 @@ async function agentDemo(): Promise<void> {
   console.log(`
 ╔═══════════════════════════════════════════════════════════════════════╗
 ║                                                                       ║
-║   🤖 Decagon Agent Demo - Step 4A: On-Chain Payments                  ║
+║   🤖 Decagon Agent Demo                                       ║
 ║                                                                       ║
 ║   This script demonstrates:                                           ║
 ║   1. User policy management                                           ║
@@ -138,6 +138,7 @@ async function agentDemo(): Promise<void> {
 ║   4. Blocked payments due to policy violations                        ║
 ║   5. Successful payments within policy limits                         ║
 ║   6. On-chain payment verification (TX_HASH env var)                  ║
+║   7. Automated remittance transfers                                   ║
 ║                                                                       ║
 ╚═══════════════════════════════════════════════════════════════════════╝
   `);
@@ -355,7 +356,7 @@ async function agentDemo(): Promise<void> {
       credits: challenge.creditsOffered,
     });
 
-    // Step 5.2: Policy check before payment
+    // Policy check before payment
     log("STEP 5.2", "🔒 Checking policy before payment...");
     await sleep(300);
 
@@ -380,7 +381,7 @@ async function agentDemo(): Promise<void> {
       autoApproved: challenge.amountRequired <= (policyResult.policy.autoApproveUnderCents ?? 0),
     });
 
-    // Step 5.3: Submit payment
+    // Submit payment
     log("STEP 5.3", "💳 Submitting payment...");
     await sleep(300);
 
@@ -408,7 +409,7 @@ async function agentDemo(): Promise<void> {
     }
   }
 
-  // Step 5.4: Access content
+  // Access content
   if (sessionToken) {
     log("STEP 5.4", "📖 Accessing premium content...");
     await sleep(300);
@@ -515,28 +516,116 @@ async function agentDemo(): Promise<void> {
   }
 
   // =========================================
+  // Part 7: Automated Remittance Transfer
+  // =========================================
+  console.log("\n" + "=".repeat(60));
+  console.log("PART 7: AUTOMATED REMITTANCE TRANSFER");
+  console.log("=".repeat(60));
+
+  const RECIPIENT = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+
+  log("STEP 7.1", "💸 Creating transfer to recipient...");
+  console.log(`   Recipient: ${RECIPIENT}`);
+  await sleep(300);
+
+  const transferRes = await fetch(`${API_BASE}/transfer/create`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      recipientAddress: RECIPIENT,
+      note: "Agent-initiated rent payment",
+    }),
+  });
+
+  if (transferRes.ok) {
+    const transferData = await transferRes.json();
+    const transferChallenge: PaymentChallenge = transferData.challenge;
+
+    log("STEP 7.1", "📋 Transfer challenge created", {
+      challengeId: transferChallenge.challengeId,
+      amount: `$${(transferChallenge.amountRequired / 100).toFixed(2)}`,
+      recipient: transferData.recipientAddress,
+      note: transferData.note,
+    });
+
+    log("STEP 7.2", "🔒 Policy check for transfer...");
+    await sleep(300);
+
+    const transferPolicyRes = await fetch(`${API_BASE}/policy/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        amountCents: transferChallenge.amountRequired,
+        path: "/transfer",
+      }),
+    });
+
+    const transferPolicy: PolicyCheckResult = await transferPolicyRes.json();
+
+    if (transferPolicy.allowed) {
+      log("STEP 7.2", "✅ Transfer policy check passed", {
+        needsConfirm: transferPolicy.needsConfirm,
+        dailySpend: `$${(transferPolicy.currentDailySpend / 100).toFixed(2)}`,
+      });
+
+      log("STEP 7.3", "💳 Verifying transfer payment...");
+      await sleep(300);
+
+      const verifyRes = await fetch(`${API_BASE}/transfer/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          challengeId: transferChallenge.challengeId,
+          transactionRef: `agent_transfer_${Date.now()}`,
+          payerAddress: "0xAgentWallet",
+        }),
+      });
+
+      if (verifyRes.ok) {
+        const verifyData = await verifyRes.json();
+        log("STEP 7.3", "✅ Transfer confirmed!", {
+          receiptId: verifyData.receipt.receiptId,
+          message: verifyData.message,
+        });
+      } else {
+        const err = await verifyRes.json();
+        log("STEP 7.3", "❌ Transfer verification failed", err);
+      }
+    } else {
+      log("STEP 7.2", "🚫 Transfer blocked by policy", {
+        reason: transferPolicy.error?.reason,
+        message: transferPolicy.error?.message,
+      });
+    }
+  } else {
+    log("STEP 7.1", "❌ Failed to create transfer");
+  }
+
+  log("STEP 7.4", "📜 Checking transfer history...");
+  await sleep(300);
+
+  const historyRes = await fetch(`${API_BASE}/transfer/history`);
+  if (historyRes.ok) {
+    const historyData = await historyRes.json();
+    log("STEP 7.4", `✅ Found ${historyData.transfers?.length ?? 0} transfer(s) in history`);
+  }
+
+  // =========================================
   // Summary
   // =========================================
   console.log(`
 ╔═══════════════════════════════════════════════════════════════════════╗
 ║                                                                       ║
-║   🎉 Step 4A Demo Complete!                                           ║
+║   🎉 Decagon Agent Demo Complete!                                     ║
 ║                                                                       ║
 ║   What we demonstrated:                                               ║
 ║                                                                       ║
 ║   ✅ User policy: Set spend limits ($5/action, $10/day)               ║
-║   ✅ Strict agent: Created with $0.25 max (blocked $0.50 topup)       ║
-║   ✅ Permissive agent: Created with $1 max (allowed topup)            ║
-║   ✅ Policy enforcement: Blocked strict agent, allowed user           ║
-║   ✅ Full 402 flow: GET → 402 → policy check → pay → 200              ║
+║   ✅ Strict agent: Blocked by policy ($0.25 max < $0.50 topup)        ║
+║   ✅ Permissive agent: Passed policy check ($1 max)                   ║
+║   ✅ Full 402 flow: GET → 402 → policy → pay → 200                    ║
+║   ✅ Remittance: Agent-initiated transfer with policy enforcement      ║
 ║   ${txHash ? "✅" : "⏭️ "} On-chain verification: ${txHash ? "Verified txHash on Plasma" : "Skipped (set TX_HASH)"}             ║
-║                                                                       ║
-║   For on-chain payments:                                              ║
-║   1. Open http://localhost:3001 in browser                            ║
-║   2. Click an article to see 402 challenge                            ║
-║   3. Connect MetaMask & pay with XPL on Plasma Testnet                ║
-║   4. Copy the txHash and run:                                         ║
-║      TX_HASH=0x... npx tsx scripts/agent-demo.ts                      ║
 ║                                                                       ║
 ╚═══════════════════════════════════════════════════════════════════════╝
   `);

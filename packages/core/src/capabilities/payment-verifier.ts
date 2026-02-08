@@ -1,8 +1,8 @@
 /**
- * PaymentVerifier Capability - Step 4
+ * PaymentVerifier Capability
  * 
  * Interface for verifying payments.
- * Step 4 adds real on-chain verification via RPC.
+ * Supports real on-chain verification via RPC.
  */
 
 import { Context, Effect } from "effect";
@@ -15,7 +15,7 @@ export interface PaymentProof {
   /** Transaction hash/reference */
   readonly transactionRef: string;
 
-  /** Transaction hash (Step 4: actual txHash for on-chain verification) */
+  /** Blockchain transaction hash for on-chain verification */
   readonly txHash?: string;
 
   /** Payer wallet address */
@@ -41,7 +41,6 @@ export interface VerificationResult {
   /** Error message if invalid */
   readonly errorMessage?: string;
 
-  // Step 4: On-chain verification fields
   /** Transaction hash */
   readonly txHash?: string;
 

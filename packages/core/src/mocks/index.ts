@@ -1,5 +1,5 @@
 /**
- * Mock Implementations - Step 4
+ * Mock Implementations
  * 
  * In-memory mock implementations of all capabilities.
  * For development and testing purposes only.
@@ -150,7 +150,7 @@ export const MockArticlesStore = Layer.succeed(
 );
 
 // ============================================
-// Mock ReceiptsStore - Step 2
+// Mock ReceiptsStore
 // ============================================
 
 export const MockReceiptsStore = Layer.succeed(
@@ -358,7 +358,7 @@ export const MockLogger = Layer.succeed(
 );
 
 // ============================================
-// Mock PaymentVerifier - Step 2
+// Mock PaymentVerifier
 // ============================================
 
 export const MockPaymentVerifier = Layer.succeed(
@@ -385,7 +385,7 @@ export const MockPaymentVerifier = Layer.succeed(
 );
 
 // ============================================
-// Mock PolicyStore - Step 3
+// Mock PolicyStore
 // ============================================
 
 let agentIdCounter = 0;
@@ -408,7 +408,7 @@ export const MockPolicyStore = Layer.succeed(
 );
 
 // ============================================
-// Mock AgentStore - Step 3
+// Mock AgentStore
 // ============================================
 
 export const MockAgentStore = Layer.succeed(
@@ -487,7 +487,7 @@ export const MockAgentStore = Layer.succeed(
 );
 
 // ============================================
-// Mock UsageStore - Step 3
+// Mock UsageStore
 // ============================================
 
 export const MockUsageStore = Layer.succeed(
@@ -511,7 +511,7 @@ export const MockUsageStore = Layer.succeed(
 );
 
 // ============================================
-// Mock ChainConfig - Step 4
+// Mock ChainConfig
 // ============================================
 
 const DEFAULT_CHAIN_CONFIG: ChainConfig = {
@@ -535,7 +535,7 @@ export const MockChainConfig = Layer.succeed(
 );
 
 // ============================================
-// Mock PlasmaRpc - Step 4 (for testing only)
+// Mock PlasmaRpc
 // ============================================
 
 // Mock transaction database for testing
@@ -595,7 +595,6 @@ export const MockCapabilities = Layer.mergeAll(
   MockIdGen,
   MockLogger,
   MockPaymentVerifier,
-  // Step 4: Chain integration
   MockChainConfig,
   MockPlasmaRpc
 );

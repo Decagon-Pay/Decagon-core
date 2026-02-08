@@ -1,5 +1,5 @@
 /**
- * Live Plasma RPC Implementation - Step 4
+ * Live Plasma RPC Implementation
  * 
  * Real RPC client for Plasma Testnet.
  * Uses fetch to make JSON-RPC calls.
