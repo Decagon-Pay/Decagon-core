@@ -55,10 +55,18 @@ const USE_SQLITE = process.env["USE_SQLITE"] === "true" || process.env["NODE_ENV
 const PORT = parseInt(process.env["PORT"] ?? "4000", 10);
 const HOST = process.env["HOST"] ?? "0.0.0.0";
 
-// CORS origins
+// CORS origins — allow all .vercel.app subdomains + localhost for demo
 const ALLOWED_ORIGINS = process.env["ALLOWED_ORIGINS"]
   ? process.env["ALLOWED_ORIGINS"].split(",").map((s) => s.trim())
   : ["http://localhost:3000", "http://localhost:3001"];
+
+const corsOrigin = (origin: string | undefined, cb: (err: Error | null, allow: boolean) => void) => {
+  if (!origin) return cb(null, true); // allow non-browser requests
+  if (origin.endsWith(".vercel.app") || ALLOWED_ORIGINS.includes(origin)) {
+    return cb(null, true);
+  }
+  cb(null, false);
+};
 
 console.log(`[Config] USE_SQLITE: ${USE_SQLITE}`);
 console.log(`[Config] ALLOWED_ORIGINS: ${ALLOWED_ORIGINS.join(", ")}`);
@@ -73,7 +81,7 @@ const server = Fastify({
 
 // Enable CORS for frontend
 await server.register(cors, {
-  origin: ALLOWED_ORIGINS,
+  origin: corsOrigin,
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization", "X-User-Id"],
   exposedHeaders: ["X-Payment-Required", "X-Challenge-Id"],
