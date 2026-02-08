@@ -139,13 +139,13 @@ export default function ArticlePage() {
     }
   }, []);
 
-  // Fetch article
-  const fetchArticle = useCallback(async () => {
+  // Fetch article — accepts an optional sessionOverride to avoid stale closure / localStorage race
+  const fetchArticle = useCallback(async (sessionOverride?: SessionToken) => {
     try {
       const headers: Record<string, string> = {};
-      const stored = getStoredSession();
-      if (stored) {
-        headers["Authorization"] = `Bearer ${stored.tokenId}`;
+      const session = sessionOverride ?? getStoredSession();
+      if (session) {
+        headers["Authorization"] = `Bearer ${session.tokenId}`;
       }
 
       const res = await fetch(`${API_BASE}/article/${articleId}`, { headers });
@@ -172,16 +172,16 @@ export default function ArticlePage() {
         setContent(data.content);
         setHasFullAccess(data.hasFullAccess);
         // Update credits from balance endpoint
-        if (stored) {
+        if (session) {
           try {
             const balanceRes = await fetch(`${API_BASE}/credits/balance`, {
-              headers: { Authorization: `Bearer ${stored.tokenId}` },
+              headers: { Authorization: `Bearer ${session.tokenId}` },
             });
             if (balanceRes.ok) {
               const balanceData = await balanceRes.json();
               setCredits(balanceData.credits);
               // Update stored session
-              const updatedSession = { ...stored, credits: balanceData.credits };
+              const updatedSession = { ...session, credits: balanceData.credits };
               storeSession(updatedSession);
               setSessionToken(updatedSession);
             }
@@ -216,9 +216,9 @@ export default function ArticlePage() {
     setCredits(newSession.credits);
     storeSession(newSession);
     setShowPaymentSheet(false);
-    // Refetch article with new session
+    // Refetch article with new session — pass directly to avoid stale closure
     setLoading(true);
-    fetchArticle();
+    fetchArticle(newSession);
   };
 
   if (loading) {

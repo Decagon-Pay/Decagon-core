@@ -48,6 +48,7 @@ export function PaymentSheet({
   const [txHash, setTxHash] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<DecagonReceipt | null>(null);
   const [hasMetaMask, setHasMetaMask] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const chainIdHex = `0x${config.plasmaChainId.toString(16)}`;
 
@@ -201,21 +202,29 @@ export function PaymentSheet({
   }, [challenge.challengeId, config.apiBase, existingSessionTokenId, onSuccess]);
 
   const handlePayment = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     setStep("connecting");
     setError(null);
-    const address = await connectWallet();
-    if (!address) { setStep("confirm"); return; }
-    setStep("sending");
-    const hash = await sendTransaction(address);
-    if (!hash) { setStep("confirm"); return; }
-    setTxHash(hash);
-    setStep("confirming");
-    const verified = await verifyTransaction(hash);
-    if (verified) setStep("success");
-    else setStep("confirm");
+    try {
+      const address = await connectWallet();
+      if (!address) { setStep("confirm"); return; }
+      setStep("sending");
+      const hash = await sendTransaction(address);
+      if (!hash) { setStep("confirm"); return; }
+      setTxHash(hash);
+      setStep("confirming");
+      const verified = await verifyTransaction(hash);
+      if (verified) setStep("success");
+      else setStep("confirm");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleMockPayment = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     setStep("confirming");
     setError(null);
     try {
@@ -243,6 +252,8 @@ export function PaymentSheet({
     } catch {
       setError("Payment failed. Please try again.");
       setStep("confirm");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -385,17 +396,17 @@ export function PaymentSheet({
               <button
                 className="btn btn-success btn-full"
                 onClick={handlePayment}
-                disabled={policyResult?.needsConfirm && !confirmChecked}
+                disabled={isSubmitting || (policyResult?.needsConfirm && !confirmChecked)}
               >
-                🦊 Pay with MetaMask ({formatXpl(challenge.amountWei)} XPL)
+                {isSubmitting ? "Processing…" : `🦊 Pay with MetaMask (${formatXpl(challenge.amountWei)} XPL)`}
               </button>
             ) : (
               <button
                 className="btn btn-success btn-full"
                 onClick={handleMockPayment}
-                disabled={policyResult?.needsConfirm && !confirmChecked}
+                disabled={isSubmitting || (policyResult?.needsConfirm && !confirmChecked)}
               >
-                Pay {formatPrice(challenge.amountRequired)} (Demo Mode)
+                {isSubmitting ? "Processing…" : `Pay ${formatPrice(challenge.amountRequired)} (Demo Mode)`}
               </button>
             )}
 
@@ -403,9 +414,9 @@ export function PaymentSheet({
               <button
                 className="btn btn-secondary btn-full"
                 onClick={handleMockPayment}
-                disabled={policyResult?.needsConfirm && !confirmChecked}
+                disabled={isSubmitting || (policyResult?.needsConfirm && !confirmChecked)}
               >
-                Skip wallet (Demo Mode)
+                {isSubmitting ? "Processing…" : "Skip wallet (Demo Mode)"}
               </button>
             )}
             <button className="btn btn-ghost btn-full" onClick={onClose}>Cancel</button>

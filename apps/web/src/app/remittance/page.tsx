@@ -4,7 +4,26 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { PaymentSheet, useDecagonPayment } from "@decagon/ui";
 import type { DecagonChallenge, DecagonReceipt } from "@decagon/ui";
-import { API_BASE, PLASMA_CHAIN_ID, PLASMA_EXPLORER_TX_BASE } from "@/lib/config";
+import {
+  API_BASE,
+  PLASMA_CHAIN_ID,
+  PLASMA_EXPLORER_TX_BASE,
+} from "@/lib/config";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import {
+  Send,
+  ExternalLink,
+  Loader2,
+  CheckCircle2,
+  AlertCircle,
+  ArrowRight,
+  Clock,
+  Wallet,
+} from "lucide-react";
 
 interface TransferRecord {
   receiptId: string;
@@ -36,6 +55,10 @@ function getStoredSessionTokenId(): string | undefined {
   return undefined;
 }
 
+function shortenAddress(addr: string) {
+  return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : "—";
+}
+
 export default function RemittancePage() {
   const [recipientAddress, setRecipientAddress] = useState("");
   const [note, setNote] = useState("");
@@ -43,7 +66,10 @@ export default function RemittancePage() {
   const [challenge, setChallenge] = useState<DecagonChallenge | null>(null);
   const [history, setHistory] = useState<TransferRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   const payment = useDecagonPayment();
 
@@ -105,161 +131,182 @@ export default function RemittancePage() {
           onClose: () => setChallenge(null),
         });
       } else {
-        setMessage({ type: "error", text: data.message ?? "Failed to create transfer" });
+        setMessage({
+          type: "error",
+          text: data.message ?? "Failed to create transfer",
+        });
       }
     } catch {
-      setMessage({ type: "error", text: "Network error. Is the API running?" });
+      setMessage({
+        type: "error",
+        text: "Network error. Is the API running?",
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleTransferSuccess = (_receipt: DecagonReceipt, sessionToken: unknown) => {
+  const handleTransferSuccess = (
+    _receipt: DecagonReceipt,
+    sessionToken: unknown
+  ) => {
     setChallenge(null);
     setMessage({ type: "success", text: "Transfer sent successfully!" });
     setRecipientAddress("");
     setNote("");
-    if (sessionToken && typeof sessionToken === "object" && "tokenId" in sessionToken) {
+    if (
+      sessionToken &&
+      typeof sessionToken === "object" &&
+      "tokenId" in sessionToken
+    ) {
       localStorage.setItem(SESSION_KEY, JSON.stringify(sessionToken));
     }
     fetchHistory();
   };
 
-  const shortenAddress = (addr: string) =>
-    addr ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : "—";
-
   return (
-    <main className="container" style={{ maxWidth: 720, margin: "0 auto", padding: "2rem 1.5rem" }}>
-      <Link href="/" className="back-link">← Back to Marketplace</Link>
-
-      <div style={{ marginBottom: "2rem" }}>
-        <h1 style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          💸 Remittance
-        </h1>
-        <p style={{ color: "var(--text-secondary)" }}>
-          Send funds to any address on Plasma testnet using the same Decagon Payment Sheet.
+    <div className="mx-auto max-w-2xl px-4 sm:px-6 py-12">
+      {/* Header */}
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-2">
+          <Send className="h-5 w-5 text-primary" />
+          <Badge variant="muted">Remittance Demo</Badge>
+        </div>
+        <h1 className="text-3xl font-bold tracking-tight">Remittance</h1>
+        <p className="mt-2 text-muted-foreground">
+          Send funds to any address on Plasma testnet using the Decagon Payment
+          Sheet.
         </p>
       </div>
 
+      {/* Status message */}
       {message && (
-        <div style={{
-          padding: "0.75rem 1rem",
-          borderRadius: 8,
-          marginBottom: "1rem",
-          background: message.type === "success" ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)",
-          color: message.type === "success" ? "var(--success)" : "var(--error)",
-        }}>
+        <div
+          className={`flex items-center gap-2 rounded-lg p-3 mb-6 text-sm ${
+            message.type === "success"
+              ? "bg-emerald-500/10 text-emerald-600 border border-emerald-200"
+              : "bg-red-500/10 text-red-600 border border-red-200"
+          }`}
+        >
+          {message.type === "success" ? (
+            <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+          )}
           {message.text}
         </div>
       )}
 
-      <div style={{
-        background: "var(--card-bg)",
-        borderRadius: 12,
-        border: "1px solid var(--border)",
-        padding: "1.5rem",
-        marginBottom: "2rem",
-      }}>
-        <h3 style={{ marginBottom: "1rem" }}>New Transfer</h3>
+      {/* Transfer form */}
+      <Card className="mb-8">
+        <CardHeader>
+          <CardTitle className="text-lg">New Transfer</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <label className="text-sm font-medium text-muted-foreground mb-1.5 block">
+              Recipient Address
+            </label>
+            <Input
+              type="text"
+              placeholder="0x..."
+              value={recipientAddress}
+              onChange={(e) => setRecipientAddress(e.target.value)}
+              className="font-mono text-sm"
+            />
+          </div>
 
-        <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-          Recipient Address
-        </label>
-        <input
-          type="text"
-          placeholder="0x..."
-          value={recipientAddress}
-          onChange={(e) => setRecipientAddress(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "0.75rem 1rem",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            background: "var(--bg-secondary)",
-            color: "var(--text)",
-            fontSize: "0.9rem",
-            fontFamily: "monospace",
-            marginBottom: "1rem",
-          }}
-        />
+          <div>
+            <label className="text-sm font-medium text-muted-foreground mb-1.5 block">
+              Note (optional)
+            </label>
+            <Input
+              type="text"
+              placeholder="e.g. Rent payment, Gift, Invoice #123"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
 
-        <label style={{ display: "block", marginBottom: "0.5rem", fontSize: "0.875rem", color: "var(--text-secondary)" }}>
-          Note (optional)
-        </label>
-        <input
-          type="text"
-          placeholder="e.g. Rent payment, Gift, Invoice #123"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "0.75rem 1rem",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            background: "var(--bg-secondary)",
-            color: "var(--text)",
-            fontSize: "0.9rem",
-            marginBottom: "1.5rem",
-          }}
-        />
+          <Button
+            className="w-full gap-2"
+            onClick={handleCreateTransfer}
+            disabled={loading}
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+            {loading ? "Creating transfer…" : "Send Transfer"}
+            {!loading && <ArrowRight className="h-4 w-4" />}
+          </Button>
+        </CardContent>
+      </Card>
 
-        <button
-          className="btn btn-primary"
-          onClick={handleCreateTransfer}
-          disabled={loading}
-          style={{ width: "100%" }}
-        >
-          {loading ? "Creating transfer..." : "Send Transfer →"}
-        </button>
-      </div>
-
+      {/* Transfer history */}
       <div>
-        <h3 style={{ marginBottom: "1rem" }}>Transfer History</h3>
+        <h2 className="text-lg font-semibold mb-4">Transfer History</h2>
+
         {historyLoading ? (
-          <div className="loading"><div className="spinner" /></div>
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         ) : history.length === 0 ? (
-          <p style={{ color: "var(--text-muted)", textAlign: "center", padding: "2rem" }}>
-            No transfers yet. Send your first transfer above.
-          </p>
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              <Wallet className="h-10 w-10 mx-auto mb-3 opacity-40" />
+              <p>No transfers yet. Send your first transfer above.</p>
+            </CardContent>
+          </Card>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          <div className="space-y-3">
             {history.map((tx) => (
-              <div
-                key={tx.receiptId}
-                style={{
-                  background: "var(--card-bg)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: "1rem",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
-                  <span style={{ fontWeight: 600 }}>
-                    To: {shortenAddress(tx.resourceId?.replace("transfer:", "") ?? "")}
-                  </span>
-                  <span style={{ color: "var(--success)", fontWeight: 600 }}>
-                    ${((tx.amountPaid ?? 0) / 100).toFixed(2)}
-                  </span>
-                </div>
-                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
-                  <span>{tx.verifiedAt ? new Date(tx.verifiedAt).toLocaleString() : "—"}</span>
-                  {tx.txHash && (
-                    <a
-                      href={tx.explorerUrl || `${PLASMA_EXPLORER_TX_BASE}${tx.txHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: "var(--primary)" }}
-                    >
-                      View TX →
-                    </a>
-                  )}
-                </div>
-              </div>
+              <Card key={tx.receiptId}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-sm flex items-center gap-1.5">
+                      <Send className="h-3.5 w-3.5 text-muted-foreground" />
+                      To:{" "}
+                      <span className="font-mono">
+                        {shortenAddress(
+                          tx.resourceId?.replace("transfer:", "") ?? ""
+                        )}
+                      </span>
+                    </span>
+                    <Badge variant="success" className="font-semibold">
+                      ${((tx.amountPaid ?? 0) / 100).toFixed(2)}
+                    </Badge>
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3" />
+                      {tx.verifiedAt
+                        ? new Date(tx.verifiedAt).toLocaleString()
+                        : "—"}
+                    </span>
+                    {tx.txHash && (
+                      <a
+                        href={
+                          tx.explorerUrl ||
+                          `${PLASMA_EXPLORER_TX_BASE}${tx.txHash}`
+                        }
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-primary hover:underline flex items-center gap-1"
+                      >
+                        View TX <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
       </div>
 
+      {/* Payment Sheet */}
       {payment.isOpen && payment.challenge && payment.config && (
         <PaymentSheet
           challenge={payment.challenge}
@@ -270,6 +317,6 @@ export default function RemittancePage() {
           onSuccess={payment.onSuccess}
         />
       )}
-    </main>
+    </div>
   );
 }

@@ -40,8 +40,18 @@ const MOCK_ARTICLES: Article[] = [
     title: "The Future of Web Monetization",
     author: "Sarah Chen",
     preview: "Web monetization has long been dominated by advertising and subscriptions. But what if there was a better way? In this article, we explore how micro-payments could transform the internet economy...",
-    premiumContent: "The complete guide to implementing micro-payments on your platform. This includes detailed technical specifications, case studies from early adopters, and a step-by-step implementation guide. We'll cover the HTTP 402 protocol, stablecoin integration, and user experience best practices that maximize conversion while minimizing friction.",
-    price: 50, // 50 cents
+    premiumContent: `The complete guide to implementing micro-payments on your platform.
+
+For two decades the web has been funded by a fragile duopoly: advertising and subscriptions. Advertising incentivises engagement farming, while subscriptions create "all or nothing" bundles that leave most users priced out. HTTP 402 — Payment Required — was reserved in the original HTTP spec precisely for a third option, but the payment rails never materialised.
+
+Until now. With sub-cent transaction fees on Layer 2 chains like Plasma, a publisher can charge $0.10 for an article and the reader will still pay less than the cognitive cost of dismissing a cookie banner. The economics flip: creators are paid per piece of value, and readers never see an ad again.
+
+Implementation is straightforward. Your server checks for a valid session token on each request. If the token is absent or has insufficient credits, it returns 402 with a JSON payment challenge containing the amount, recipient address, and chain ID. The client renders a payment sheet, the user taps "Pay", and a standard eth_sendTransaction call settles on Plasma in under two seconds. The server verifies the transaction, mints credits, and returns the content.
+
+We've seen early adopters achieve 8–12% conversion rates on paywalled articles — roughly 3× the industry average for soft paywalls. The key insight is that micro-payments feel cheap enough to be impulsive but expensive enough to signal quality.
+
+Best practices for maximising conversion include: keeping the payment sheet under three clicks, showing a blurred preview of premium content, offering credit bundles to reduce per-article friction, and displaying a clear receipt with an on-chain explorer link so users feel confident they got what they paid for.`,
+    price: 50,
     currency: "USD",
     publishedAt: "2026-01-15T10:00:00Z",
     readTimeMinutes: 8,
@@ -51,9 +61,21 @@ const MOCK_ARTICLES: Article[] = [
     id: "article-2",
     title: "HTTP 402: The Forgotten Status Code",
     author: "Marcus Williams",
-    preview: "When HTTP status codes were designed, 402 was reserved for 'Payment Required' - but it was never properly defined. Decades later, we finally have the technology to make it useful...",
-    premiumContent: "A deep dive into the history of HTTP 402, from its origins in RFC 2616 to modern implementations. We examine how stablecoins and smart contracts enable trustless payments that the original designers could only dream of. Includes code examples in TypeScript, Go, and Rust.",
-    price: 75, // 75 cents
+    preview: "When HTTP status codes were designed, 402 was reserved for 'Payment Required' — but it was never properly defined. Decades later, we finally have the technology to make it useful...",
+    premiumContent: `A deep dive into the history of HTTP 402, from its origins in RFC 2616 to modern implementations.
+
+When Tim Berners-Lee and the early IETF working group drafted the original HTTP status codes in the early 1990s, they included a curious placeholder: 402 Payment Required. The RFC noted it was "reserved for future use" — an acknowledgement that the web would one day need a native payment layer, but that the technology wasn't ready.
+
+For thirty years 402 gathered dust. Credit card networks couldn't economically process payments below $1. PayPal required accounts. Bitcoin was too volatile. Every attempt to build "pay for the web" failed because the payment instrument was worse than the alternative (ads).
+
+Three things changed simultaneously: (1) stablecoins pegged to the dollar eliminated price volatility, (2) Layer 2 rollups like Plasma reduced fees to fractions of a cent, and (3) browser wallets like MetaMask became mainstream enough that "connect wallet" is no longer alien. Suddenly, 402 makes sense.
+
+The modern 402 flow works like this: the server returns a JSON body alongside the 402 status containing a PaymentChallenge object. This object specifies the payee address, amount in both fiat and native token, chain ID, and an expiry timestamp. The client parses this challenge, presents a confirmation UI, and sends a standard Ethereum transaction. After confirmation, the client POSTs the transaction hash back to the server, which verifies it on-chain and grants access.
+
+Implementations already exist in TypeScript, Go, and Rust. The TypeScript reference (Decagon) uses Effect for type-safe error handling and provides both a server SDK and a React payment sheet component. The Go implementation (x402-go) is middleware-first and integrates with net/http handlers in a single line.
+
+The beauty of 402 is that it's just HTTP. No proprietary APIs, no platform lock-in, no 30% app store cut. Any server, any client, any chain.`,
+    price: 75,
     currency: "USD",
     publishedAt: "2026-01-20T14:30:00Z",
     readTimeMinutes: 12,
@@ -64,8 +86,22 @@ const MOCK_ARTICLES: Article[] = [
     title: "Building AI Agents That Can Pay",
     author: "Aisha Patel",
     preview: "AI agents are becoming increasingly autonomous. Soon, they'll need to access paid resources without human intervention. How do we build payment systems for machines?...",
-    premiumContent: "Technical architecture for AI agent payment systems. This covers wallet management, spending limits, audit trails, and safety mechanisms. We present a complete TypeScript implementation that integrates with popular AI frameworks like LangChain and AutoGPT.",
-    price: 100, // $1
+    premiumContent: `Technical architecture for AI agent payment systems.
+
+The next generation of AI agents won't just generate text — they'll browse the web, call APIs, and purchase resources on behalf of their operators. An agent researching a legal question might need to buy access to a case law database. A coding agent might pay for a premium API. A market analyst agent might unlock paywalled financial reports.
+
+The challenge is delegation without danger. You want your agent to spend money, but not too much, not on the wrong things, and with a full audit trail. This is fundamentally a capability-based security problem.
+
+Our architecture uses "Agent Tokens" — scoped API keys that encode a spend policy. Each policy specifies: (1) a per-action spending cap in cents, (2) a daily aggregate cap, (3) a set of allowed URL path patterns, and (4) an auto-approve threshold below which the agent can act without human confirmation.
+
+When an agent encounters a 402 response, it extracts the payment challenge, checks it against its policy, and if approved, signs and submits the transaction using a delegated wallet. The server verifies the payment and returns a session token that the agent includes in subsequent requests.
+
+We implemented this in TypeScript using Effect for composable error handling. The key types are SpendPolicy, Agent, and AgentToken. The spend-check pipeline runs in constant time: it loads the policy, checks the amount against per-action and daily caps, verifies the URL pattern against the allowlist, and either approves or rejects.
+
+Safety mechanisms include: (1) daily cap resets at UTC midnight, (2) all transactions are logged with full receipts, (3) operators can revoke tokens instantly via the management API, and (4) the auto-approve threshold creates a natural "speed bump" for larger purchases.
+
+In testing with LangChain-based research agents, we found that agents with $5/day caps and article-only allowlists could autonomously research topics across 10–15 paywalled sources per session, costing roughly $2–3 in micro-payments while producing significantly higher-quality output than agents limited to free sources.`,
+    price: 100,
     currency: "USD",
     publishedAt: "2026-02-01T09:00:00Z",
     readTimeMinutes: 15,
@@ -76,8 +112,20 @@ const MOCK_ARTICLES: Article[] = [
     title: "Stablecoins for Everyday Payments",
     author: "David Kim",
     preview: "Cryptocurrency volatility has long been a barrier to adoption. Stablecoins offer a solution, but how do they work in practice for small, everyday transactions?...",
-    premiumContent: "A practical guide to integrating stablecoins into your payment flow. We cover Plasma, USDC, and other major stablecoins, comparing their fees, settlement times, and developer experience. Includes integration examples for e-commerce, content platforms, and API services.",
-    price: 60, // 60 cents
+    premiumContent: `A practical guide to integrating stablecoins into your payment flow.
+
+The promise of crypto payments has always been undermined by a simple problem: nobody wants to buy a coffee with an asset that might be worth 10% more tomorrow. Stablecoins solve this by pegging to a fiat currency — typically the US dollar — giving merchants predictable revenue and consumers predictable costs.
+
+For micro-payments specifically, the chain you choose matters enormously. Ethereum mainnet charges $2–5 per transaction, making sub-dollar payments absurd. But Layer 2 solutions change the calculus entirely. Plasma testnet processes transactions for fractions of a cent with confirmation in 1–2 seconds. At these economics, paying $0.10 for an article is not just viable — it's cheaper than processing a credit card payment.
+
+The integration pattern for stablecoin micro-payments follows a standard flow. First, the merchant deploys a receiver address (or uses a hosted service). Second, the client application requests a payment challenge from the server. Third, the user approves a wallet transaction. Fourth, the server monitors the chain for confirmation and credits the user's session.
+
+One nuance that catches developers off guard: you need to handle both native token payments (where the value is in the transaction itself) and ERC-20 token payments (where the value is in a separate token transfer). Decagon's PaymentSheet abstracts this by reading the assetType field from the payment challenge and rendering the appropriate flow.
+
+Settlement times vary by chain. On Plasma testnet, a transaction is typically included in a block within 2 seconds. On Optimism, it's 2–4 seconds. On Arbitrum, 0.5–2 seconds. For micro-payments, these are all effectively "instant" from the user's perspective.
+
+Key metrics from our pilot with three publishers: average transaction value $0.47, median confirmation time 1.8s, payment success rate 97.2%, and chargeback rate 0.0% (because blockchain transactions are final).`,
+    price: 60,
     currency: "USD",
     publishedAt: "2026-02-03T11:00:00Z",
     readTimeMinutes: 10,
@@ -88,12 +136,146 @@ const MOCK_ARTICLES: Article[] = [
     title: "The End of Subscription Fatigue",
     author: "Elena Rodriguez",
     preview: "The average consumer now has 12 active subscriptions. Is there a breaking point? Pay-per-use models offer an alternative that benefits both creators and consumers...",
-    premiumContent: "Research and analysis on subscription economics versus pay-per-use models. We present data from 50,000 users comparing engagement, satisfaction, and lifetime value across different monetization strategies. Includes a framework for deciding which model fits your content.",
-    price: 80, // 80 cents
+    premiumContent: `Research and analysis on subscription economics versus pay-per-use models.
+
+The subscription economy exploded in the 2010s. Netflix, Spotify, Adobe Creative Cloud — suddenly everything was $9.99/month. By 2025 the average American household carried 12 active subscriptions totalling over $200/month, and 67% of consumers reported feeling overwhelmed by the sheer number of recurring charges on their statements.
+
+The core problem with subscriptions is misaligned incentives. Publishers want to maximise subscriber count, so they create bundles. But the average user only reads 3–4 articles per month from any given publication. They're paying $10/month for $2 worth of content.
+
+Pay-per-use models flip this dynamic. The reader pays exactly for what they consume. The creator gets paid for every piece of value they produce. There's no "subscriber who never logs in" subsiding the power users.
+
+We surveyed 50,000 users across five pilot publications that offered both subscription and pay-per-article options. The findings were striking: (1) 41% of users who declined a subscription purchased at least one article via micro-payment, (2) per-article readers had 2.3× higher engagement (time on page, scroll depth) than subscribers, (3) creator revenue per article was 18% higher under the micro-payment model due to higher per-piece pricing, and (4) user satisfaction scores were 22% higher for pay-per-use.
+
+The hybrid model works best: offer a subscription for power users, but let casual readers pay per article. This captures both segments and maximises total addressable revenue. The key is making the micro-payment flow as frictionless as the subscription login — which is exactly what one-click wallet payments enable.`,
+    price: 80,
     currency: "USD",
     publishedAt: "2026-02-05T16:00:00Z",
     readTimeMinutes: 11,
     tags: ["subscriptions", "economics", "ux"],
+  },
+  {
+    id: "article-6",
+    title: "Zero-Knowledge Proofs Meet Micropayments",
+    author: "Liam O'Connor",
+    preview: "Privacy and payments have always been at odds. Zero-knowledge proofs offer a way to verify transactions without revealing the buyer's identity...",
+    premiumContent: `How ZK proofs enable private micro-payments without sacrificing verifiability.
+
+Every time you pay for an article with a credit card, the publisher learns your name, email, and often your browsing history. Even blockchain payments leak information — your wallet address is linked to every transaction you've ever made. For sensitive content (medical research, legal analysis, investigative journalism), this is a real barrier.
+
+Zero-knowledge proofs offer an elegant solution: the buyer proves they paid the correct amount to the correct address without revealing which wallet the payment came from. The server verifies the proof, confirms the payment is valid, and grants access — all without learning who the buyer is.
+
+The construction uses a ZK-SNARK circuit that takes as private inputs the sender address, transaction hash, and Merkle proof of inclusion in the block. The public inputs are the recipient address, amount, and block number. The prover generates a succinct proof that these constraints are satisfied, and the verifier checks it in constant time.
+
+In practice, proof generation takes 2–3 seconds on a modern laptop — acceptable for a one-time payment flow. Verification is near-instant. The total overhead compared to a standard payment is about 3 seconds, which we hide behind a progress animation.
+
+We built a prototype using Circom and snarkjs that integrates with the Decagon payment flow. The PaymentSheet detects when the user has opted into private mode and routes through the ZK prover instead of directly submitting the transaction hash. The server verifies the ZK proof and mints credits identically to the standard flow.
+
+Early feedback from journalists and researchers has been overwhelmingly positive. One investigative reporter told us: "I can finally pay for documents without worrying that my source will be identified by tracing my wallet."`,
+    price: 90,
+    currency: "USD",
+    publishedAt: "2026-02-10T08:00:00Z",
+    readTimeMinutes: 14,
+    tags: ["privacy", "zk-proofs", "cryptography"],
+  },
+  {
+    id: "article-7",
+    title: "Designing Payment UX That Converts",
+    author: "Maya Johnson",
+    preview: "The difference between a 2% and a 12% conversion rate on a paywall often comes down to design. Here's what we learned from A/B testing 30,000 payment flows...",
+    premiumContent: `Lessons from 30,000 A/B-tested payment flows on how to design micro-payment UX.
+
+We ran 47 A/B tests across six publications over four months, measuring conversion rate, time-to-pay, and post-payment satisfaction. The results challenged several common assumptions about payment UX.
+
+Finding #1: Blur beats walls. Showing a blurred preview of premium content (with enough visible to create desire) converted 3.2× better than a hard cutoff with a "Subscribe to continue" message. The blur creates a sense of proximity — the content is right there, just slightly out of reach.
+
+Finding #2: Price anchoring matters enormously. Showing "$0.50 — less than a coffee" converted 2.1× better than showing "$0.50" alone. Framing the price in terms of a familiar everyday purchase reduces the perceived cost.
+
+Finding #3: The payment sheet must load in under 200ms. Every 100ms of additional latency reduced conversion by 7%. Users interpret slowness as insecurity. Pre-fetch the payment challenge while the user scrolls through the preview.
+
+Finding #4: Show the receipt immediately. Users who see a receipt with a blockchain explorer link within 2 seconds of payment have a 94% return rate. Users who don't see confirmation for 5+ seconds have only a 61% return rate. Trust is built in the first moments after money changes hands.
+
+Finding #5: Credit bundles increase lifetime value by 40%. Instead of charging per article, offer "Buy 10 credits for $4" (a 20% discount). Users spend credits more freely than cash, and the sunk cost effect drives return visits.
+
+Finding #6: One-click repeat payments are essential. After the first purchase, subsequent paywalls should show a single "Unlock (1 credit)" button — no wallet interaction, no confirmation dialog. The goal is to make paying feel as natural as scrolling.
+
+We distilled these findings into the Decagon PaymentSheet component, which implements all six patterns out of the box. Publishers using the default configuration see median conversion rates of 9.8% on first visits and 23% on return visits.`,
+    price: 70,
+    currency: "USD",
+    publishedAt: "2026-02-14T12:00:00Z",
+    readTimeMinutes: 9,
+    tags: ["design", "ux", "conversion"],
+  },
+  {
+    id: "article-8",
+    title: "The Legal Landscape of Onchain Payments",
+    author: "James Hartley",
+    preview: "As onchain payments go mainstream, regulators are paying attention. We break down the current legal frameworks across the US, EU, and Asia — and what's coming next...",
+    premiumContent: `A comprehensive overview of the regulatory landscape for onchain micro-payments.
+
+The legal status of stablecoin payments varies dramatically by jurisdiction. In the United States, stablecoins are treated as "money transmission" in most states, requiring publishers who accept them to either use a licensed payment processor or obtain their own money transmitter license. However, the 2025 Stablecoin TRUST Act created a federal framework that exempts transactions under $100 from most reporting requirements — a critical carve-out for micro-payments.
+
+In the European Union, the Markets in Crypto-Assets (MiCA) regulation took full effect in 2025 and classifies stablecoins as "e-money tokens." Publishers accepting stablecoin payments must partner with a licensed e-money institution, but the compliance burden is significantly lower than traditional payment processing. The key advantage: MiCA provides a single passport that works across all 27 EU member states.
+
+Asia presents a patchwork. Singapore's Payment Services Act treats stablecoins favourably, requiring only a standard payment institution license. Japan allows stablecoin payments under its revised Payment Services Act but restricts which tokens are eligible. South Korea's Virtual Asset User Protection Act is still evolving.
+
+For developers building payment infrastructure, the practical implications are: (1) use a licensed stablecoin (USDC, USDT) rather than an algorithmic one, (2) implement basic KYC for transactions above your jurisdiction's threshold, (3) maintain transaction logs with timestamps, amounts, and addresses for audit purposes, and (4) consult local counsel before accepting payments in a new jurisdiction.
+
+The trend is clearly toward accommodation. Regulators recognise that blocking stablecoin payments is impractical and that the technology offers significant advantages in transparency and auditability over cash. The publishers who build compliant infrastructure now will have a significant first-mover advantage.`,
+    price: 85,
+    currency: "USD",
+    publishedAt: "2026-02-18T15:00:00Z",
+    readTimeMinutes: 13,
+    tags: ["legal", "regulation", "compliance"],
+  },
+  {
+    id: "article-9",
+    title: "Plasma Network: The Layer 2 Built for Payments",
+    author: "Yuki Tanaka",
+    preview: "Not all Layer 2s are created equal. Plasma Network was designed from the ground up for high-throughput, low-latency payment transactions. Here's what makes it different...",
+    premiumContent: `A technical deep-dive into Plasma Network's architecture and why it's ideal for micro-payments.
+
+Plasma Network is an EVM-compatible Layer 2 rollup optimised for payment workloads. While general-purpose L2s like Optimism and Arbitrum handle everything from DeFi to NFTs, Plasma focuses on a single use case: moving value quickly and cheaply. This focus enables architectural choices that general-purpose chains can't make.
+
+Block time on Plasma is 500ms — four times faster than Ethereum's 12 seconds and twice as fast as most L2s. This means a transaction is included in a block within half a second of submission, and the user sees confirmation in 1–2 seconds end-to-end. For a payment flow, this is the difference between "instant" and "waiting."
+
+Transaction fees are a fraction of a cent. Plasma achieves this through aggressive calldata compression: payment transactions (simple value transfers) are compressed to just 20 bytes on L1, compared to the ~100+ bytes required by general-purpose rollups. The sequencer batches thousands of transactions into a single L1 commitment, amortising the base cost across all participants.
+
+The native token, XPL, is used for gas fees and can also represent value directly. For USD-denominated payments, the Decagon protocol specifies amounts in cents and converts to XPL at the current exchange rate. The PaymentSheet handles this conversion transparently.
+
+Data availability is ensured through Ethereum L1 calldata. Every Plasma batch is posted to Ethereum mainnet, meaning that even if the Plasma sequencer goes offline, all transaction data is recoverable from L1. Users can force-exit their funds through an L1 contract at any time.
+
+For developers integrating with Plasma, the experience is identical to any EVM chain. Standard ethers.js or viem calls work out of the box. The only configuration required is the chain ID (9746 for testnet) and an RPC URL. Decagon's SDK abstracts even this — developers specify a chain ID in their config and the library handles the rest.`,
+    price: 65,
+    currency: "USD",
+    publishedAt: "2026-02-22T10:00:00Z",
+    readTimeMinutes: 11,
+    tags: ["plasma", "layer2", "infrastructure"],
+  },
+  {
+    id: "article-10",
+    title: "From Paywall to Pay-Per-Query: Monetising APIs",
+    author: "Raj Krishnamurthy",
+    preview: "APIs are the backbone of the modern internet. What happens when every API call can be individually priced and settled on-chain?...",
+    premiumContent: `How HTTP 402 transforms API monetisation from subscriptions to per-call billing.
+
+Today's API economy runs on API keys and monthly invoices. Stripe charges $0.004 per API call. OpenAI charges per token. Twilio charges per message. But the billing is always aggregated — you get an invoice at the end of the month and hope it matches your expectations.
+
+HTTP 402 enables a fundamentally different model: per-call, real-time, settled-on-chain. The API returns 402 with a payment challenge, the client pays, and the server processes the request. No accounts, no API keys, no invoices, no disputes.
+
+The advantages are compelling: (1) Zero onboarding friction — any client with a wallet can call any API, (2) No credit risk — payment is collected before the work is done, (3) Global access — developers in countries without access to Stripe or traditional payment processors can use any API, (4) Machine-native — AI agents can discover and pay for APIs without human intervention.
+
+We built a proof-of-concept "402 API gateway" that sits in front of any HTTP service and adds payment-required semantics. The configuration is a YAML file specifying which routes require payment and how much each costs. A request to a protected route returns 402 with a payment challenge. After payment, the gateway forwards the request to the upstream service and returns the response.
+
+The gateway handles credit sessions natively: after an initial payment, the client receives a session token with N credits. Subsequent requests deduct credits without requiring new on-chain transactions. This reduces the effective cost per call to near zero after the initial top-up.
+
+In a pilot with three AI-focused API providers, the 402 gateway processed 2.3 million paid API calls in one month. Average payment was $0.003 per call. Settlement was 100% on-chain. Dispute rate: 0%. Compare this to the traditional model where chargeback rates on API billing run 1.5–3% for international customers.
+
+The future of API monetisation is not subscriptions or invoices. It's pay-per-call, settled in real time, on a chain fast enough that the user never waits.`,
+    price: 95,
+    currency: "USD",
+    publishedAt: "2026-02-28T09:00:00Z",
+    readTimeMinutes: 12,
+    tags: ["apis", "monetization", "infrastructure"],
   },
 ];
 
@@ -221,6 +403,13 @@ export const MockReceiptsStore = Layer.succeed(
     hasReceiptForChallenge: (challengeId: string) =>
       Effect.succeed(
         Array.from(receiptsDb.values()).some((r) => r.challengeId === challengeId)
+      ),
+
+    getReceiptByTxRef: (txRef: string) =>
+      Effect.succeed(
+        Array.from(receiptsDb.values()).find(
+          (r) => r.transactionRef === txRef || r.txHash === txRef
+        ) ?? null
       ),
   })
 );

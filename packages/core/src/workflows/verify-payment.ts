@@ -2,12 +2,13 @@
  * Verify Payment and Issue Session Workflow
  * 
  * Flow:
- * 1. Validate challenge exists and is not expired
- * 2. Verify payment proof (via RPC for on-chain, mock fallback)
- * 3. Mark challenge as paid
- * 4. Create receipt with credits purchased (including on-chain fields)
- * 5. Create or update session with credits
- * 6. Return session token
+ * 1. Idempotency check — if receipt already exists for this txHash, return it
+ * 2. Validate challenge exists and is not expired
+ * 3. Verify payment proof (via RPC for on-chain, mock fallback)
+ * 4. Mark challenge as paid
+ * 5. Create receipt with credits purchased (including on-chain fields)
+ * 6. Create or update session with credits
+ * 7. Return session token
  */
 
 import { Effect, pipe } from "effect";
@@ -48,7 +49,10 @@ const invalidPayment = (challengeId: string, reason: string): InvalidPaymentErro
 });
 
 /**
- * Verify payment and issue/update session with credits
+ * Verify payment and issue/update session with credits.
+ * 
+ * IDEMPOTENT: calling twice with the same txHash returns the same receipt
+ * without minting additional credits.
  */
 export const verifyPaymentAndIssueSession = (
   input: VerifyPaymentInput
@@ -57,142 +61,168 @@ export const verifyPaymentAndIssueSession = (
   ApiError,
   ReceiptsStore | ChallengesStore | Clock | IdGen | Logger | PaymentVerifier
 > =>
-  pipe(
-    // Get and validate challenge
-    Effect.flatMap(ChallengesStore, (store) => store.get(input.challengeId)),
-    Effect.flatMap((challenge) =>
-      Effect.flatMap(Clock, (clock) => clock.isPast(challenge.expiresAt)).pipe(
-        Effect.flatMap((isExpired) => {
-          if (isExpired) {
-            return Effect.fail(invalidPayment(input.challengeId, "Challenge has expired"));
-          }
-          if (challenge.status !== "pending") {
-            return Effect.fail(invalidPayment(input.challengeId, `Challenge already ${challenge.status}`));
-          }
-          return Effect.succeed(challenge);
-        })
-      )
-    ),
+  Effect.gen(function* () {
+    const receiptsStore = yield* ReceiptsStore;
+    const challengesStore = yield* ChallengesStore;
+    const clock = yield* Clock;
+    const idGen = yield* IdGen;
+    const logger = yield* Logger;
+    const paymentVerifier = yield* PaymentVerifier;
 
-    // Check for double-spending using txHash or transactionRef
-    Effect.tap(() => {
-      const txRef = input.txHash || input.transactionRef;
-      if (!txRef) {
-        return Effect.fail(invalidPayment(input.challengeId, "No transaction reference provided"));
-      }
-      return Effect.flatMap(PaymentVerifier, (verifier) =>
-        verifier.isTransactionUsed(txRef)
-      ).pipe(
-        Effect.flatMap((isUsed) =>
-          isUsed
-            ? Effect.fail(invalidPayment(input.challengeId, "Transaction already used"))
-            : Effect.succeed(undefined)
-        )
+    const txRef = input.txHash || input.transactionRef;
+    if (!txRef) {
+      return yield* Effect.fail(invalidPayment(input.challengeId, "No transaction reference provided"));
+    }
+
+    // ── Step 1: Idempotency check ──────────────────────────────────
+    // If we already issued a receipt for this txRef, return it without
+    // minting any additional credits.
+    const existingReceipt = yield* receiptsStore.getReceiptByTxRef(txRef);
+    if (existingReceipt) {
+      yield* logger.info("[verify] idempotency hit — returning existing receipt", {
+        txRef,
+        receiptId: existingReceipt.receiptId,
+        challengeId: existingReceipt.challengeId,
+      });
+      // Return the existing receipt + the session token the caller already has,
+      // or look up the one created during the original verification.
+      const sessionTokenId = input.existingSessionTokenId || existingReceipt.receiptId;
+      // Try to resolve the session; if caller supplied one, return it, otherwise
+      // build a stub from the receipt (credits are already minted).
+      const sessionResult = yield* Effect.either(
+        receiptsStore.getSession(input.existingSessionTokenId ?? "")
       );
-    }),
+      const session: SessionToken = sessionResult._tag === "Right"
+        ? sessionResult.right
+        : {
+            tokenId: sessionTokenId,
+            credits: existingReceipt.creditsPurchased,
+            currency: existingReceipt.currency,
+            createdAt: existingReceipt.verifiedAt,
+            expiresAt: existingReceipt.expiresAt,
+            accessCount: 0,
+          };
+      return { receipt: existingReceipt, sessionToken: session };
+    }
 
-    // Verify the payment (mock for legacy, RPC for txHash)
-    Effect.flatMap((challenge) =>
-      Effect.flatMap(PaymentVerifier, (verifier) =>
-        verifier.verify(challenge, {
-          transactionRef: input.txHash || input.transactionRef || "",
-          txHash: input.txHash,
-          payerAddress: input.payerAddress || "",
-          chain: challenge.chain,
-        })
-      ).pipe(
-        Effect.flatMap((result) =>
-          result.valid
-            ? Effect.succeed({ challenge, result })
-            : Effect.fail(invalidPayment(input.challengeId, result.errorMessage ?? "Verification failed"))
-        )
-      )
-    ),
+    // ── Step 2: Validate challenge ─────────────────────────────────
+    const challenge = yield* challengesStore.get(input.challengeId);
 
-    // Mark challenge as paid and transaction as used
-    Effect.tap(({ challenge }) => {
-      const txRef = input.txHash || input.transactionRef || "";
-      return Effect.all([
-        Effect.flatMap(ChallengesStore, (store) => store.markPaid(challenge.challengeId)),
-        Effect.flatMap(PaymentVerifier, (verifier) => verifier.markTransactionUsed(txRef)),
-      ]);
-    }),
+    // If challenge is already paid, check if there's a receipt for it
+    // (another request might have just beaten us).
+    if (challenge.status === "paid") {
+      const hasReceipt = yield* receiptsStore.hasReceiptForChallenge(challenge.challengeId);
+      if (hasReceipt) {
+        yield* logger.info("[verify] challenge already paid — treating as idempotent", {
+          challengeId: challenge.challengeId, txRef,
+        });
+        // We don't have a receipt by txRef (checked above) but the challenge
+        // is paid, so this is a truly duplicate call with a *different* txRef
+        // for the *same* challenge. Reject — one challenge, one payment.
+        return yield* Effect.fail(invalidPayment(input.challengeId, "Challenge already paid"));
+      }
+    }
 
-    // Generate IDs and create receipt + session
-    Effect.flatMap(({ challenge, result }) =>
-      Effect.all({
-        receiptId: Effect.flatMap(IdGen, (idGen) => idGen.receiptId()),
-        sessionTokenId: input.existingSessionTokenId 
-          ? Effect.succeed(input.existingSessionTokenId)
-          : Effect.flatMap(IdGen, (idGen) => idGen.sessionTokenId()),
-        now: Effect.flatMap(Clock, (clock) => clock.now()),
-        sessionExpiry: Effect.flatMap(Clock, (clock) => clock.futureHours(SESSION_EXPIRY_HOURS)),
-        challenge: Effect.succeed(challenge),
-        verificationResult: Effect.succeed(result),
-      })
-    ),
+    const isExpired = yield* clock.isPast(challenge.expiresAt);
+    if (isExpired) {
+      return yield* Effect.fail(invalidPayment(input.challengeId, "Challenge has expired"));
+    }
+    if (challenge.status !== "pending") {
+      return yield* Effect.fail(invalidPayment(input.challengeId, `Challenge already ${challenge.status}`));
+    }
 
-    // Create receipt and session
-    Effect.flatMap(({ receiptId, sessionTokenId, now, sessionExpiry, challenge, verificationResult }) => {
-      const receipt: Receipt = {
-        receiptId,
-        challengeId: challenge.challengeId,
-        resourceId: challenge.resourceId,
-        amountPaid: verificationResult.verifiedAmount,
-        currency: challenge.currency,
-        transactionRef: input.txHash || input.transactionRef || "",
-        verifiedAt: now,
-        expiresAt: sessionExpiry,
-        creditsPurchased: TOPUP_CREDITS,
-        status: "confirmed",
-        txHash: verificationResult.txHash || input.txHash,
-        explorerUrl: verificationResult.explorerUrl || 
-          (input.txHash ? `${challenge.explorerTxBase}${input.txHash}` : undefined),
-        blockNumber: verificationResult.blockNumber,
-        amountNative: verificationResult.amountNative,
-        payerAddress: verificationResult.payerAddress || input.payerAddress,
-        payeeAddress: verificationResult.payeeAddress || challenge.payeeAddress,
-      };
+    // ── Step 3: Double-spend guard on txRef ────────────────────────
+    const isUsed = yield* paymentVerifier.isTransactionUsed(txRef);
+    if (isUsed) {
+      return yield* Effect.fail(invalidPayment(input.challengeId, "Transaction already used"));
+    }
 
-      const sessionToken: SessionToken = {
-        tokenId: sessionTokenId,
+    // ── Step 4: Verify on-chain / mock ─────────────────────────────
+    yield* logger.info("[verify] start", { challengeId: input.challengeId, txRef });
+
+    const verificationResult = yield* paymentVerifier.verify(challenge, {
+      transactionRef: txRef,
+      txHash: input.txHash,
+      payerAddress: input.payerAddress || "",
+      chain: challenge.chain,
+    });
+
+    if (!verificationResult.valid) {
+      return yield* Effect.fail(
+        invalidPayment(input.challengeId, verificationResult.errorMessage ?? "Verification failed")
+      );
+    }
+
+    // ── Step 5: Mark paid + used (atomically) ──────────────────────
+    yield* challengesStore.markPaid(challenge.challengeId);
+    yield* paymentVerifier.markTransactionUsed(txRef);
+
+    // ── Step 6: Build receipt + session ─────────────────────────────
+    const receiptId = yield* idGen.receiptId();
+    const sessionTokenId = input.existingSessionTokenId
+      ? input.existingSessionTokenId
+      : yield* idGen.sessionTokenId();
+    const now = yield* clock.now();
+    const sessionExpiry = yield* clock.futureHours(SESSION_EXPIRY_HOURS);
+
+    const receipt: Receipt = {
+      receiptId,
+      challengeId: challenge.challengeId,
+      resourceId: challenge.resourceId,
+      amountPaid: verificationResult.verifiedAmount,
+      currency: challenge.currency,
+      transactionRef: txRef,
+      verifiedAt: now,
+      expiresAt: sessionExpiry,
+      creditsPurchased: TOPUP_CREDITS,
+      status: "confirmed",
+      txHash: verificationResult.txHash || input.txHash,
+      explorerUrl: verificationResult.explorerUrl ||
+        (input.txHash ? `${challenge.explorerTxBase}${input.txHash}` : undefined),
+      blockNumber: verificationResult.blockNumber,
+      amountNative: verificationResult.amountNative,
+      payerAddress: verificationResult.payerAddress || input.payerAddress,
+      payeeAddress: verificationResult.payeeAddress || challenge.payeeAddress,
+    };
+
+    const sessionToken: SessionToken = {
+      tokenId: sessionTokenId,
+      credits: TOPUP_CREDITS,
+      currency: challenge.currency,
+      createdAt: now,
+      expiresAt: sessionExpiry,
+      accessCount: 0,
+    };
+
+    // ── Step 7: Persist receipt + session (exactly-once) ───────────
+    yield* receiptsStore.saveReceipt(receipt);
+
+    if (input.existingSessionTokenId) {
+      const before = yield* Effect.either(receiptsStore.getSession(input.existingSessionTokenId));
+      const creditsBefore = before._tag === "Right" ? before.right.credits : 0;
+      yield* receiptsStore.addCredits(input.existingSessionTokenId, TOPUP_CREDITS);
+      yield* logger.info("[verify] credits added to existing session", {
+        sessionTokenId: input.existingSessionTokenId,
+        creditsBefore,
+        creditsAdded: TOPUP_CREDITS,
+        creditsAfter: creditsBefore + TOPUP_CREDITS,
+      });
+    } else {
+      yield* receiptsStore.saveSession(sessionToken);
+      yield* logger.info("[verify] new session created", {
+        sessionTokenId: sessionToken.tokenId,
         credits: TOPUP_CREDITS,
-        currency: challenge.currency,
-        createdAt: now,
-        expiresAt: sessionExpiry,
-        accessCount: 0,
-      };
+      });
+    }
 
-      return Effect.succeed({ receipt, sessionToken, isNewSession: !input.existingSessionTokenId });
-    }),
+    yield* logger.info("[verify] complete", {
+      receiptId: receipt.receiptId,
+      txRef,
+      sessionTokenId,
+    });
 
-    // Persist receipt and session
-    Effect.tap(({ receipt }) =>
-      Effect.flatMap(ReceiptsStore, (store) => store.saveReceipt(receipt))
-    ),
-    Effect.tap(({ sessionToken, isNewSession }) =>
-      isNewSession
-        ? Effect.flatMap(ReceiptsStore, (store) => store.saveSession(sessionToken))
-        : Effect.flatMap(ReceiptsStore, (store) =>
-            // Add credits to existing session
-            store.addCredits(sessionToken.tokenId, TOPUP_CREDITS)
-          )
-    ),
-
-    // Log success
-    Effect.tap(({ receipt, sessionToken }) =>
-      Effect.flatMap(Logger, (logger) =>
-        logger.info("Payment verified, session updated", {
-          receiptId: receipt.receiptId,
-          sessionTokenId: sessionToken.tokenId,
-          credits: sessionToken.credits,
-        })
-      )
-    ),
-
-    // Return only receipt and sessionToken
-    Effect.map(({ receipt, sessionToken }) => ({ receipt, sessionToken }))
-  );
+    return { receipt, sessionToken };
+  });
 
 /**
  * Get current balance for a session

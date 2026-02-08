@@ -149,6 +149,8 @@ const initTables = (db: Database.Database): void => {
   // Create indexes
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_receipts_challenge ON receipts(challenge_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_receipts_tx_hash ON receipts(tx_hash) WHERE tx_hash IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_receipts_tx_ref ON receipts(transaction_ref);
     CREATE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id);
     CREATE INDEX IF NOT EXISTS idx_agents_token ON agents(agent_token);
     CREATE INDEX IF NOT EXISTS idx_usage_subject_day ON usage(subject_id, day_key);
@@ -341,6 +343,19 @@ export const LiveReceiptsStore = Layer.succeed(
           return row !== undefined;
         },
         catch: (e) => internalError(`Failed to check receipt: ${e}`),
+      }),
+
+    getReceiptByTxRef: (txRef: string) =>
+      Effect.try({
+        try: () => {
+          const db = getDb();
+          const stmt = db.prepare(
+            "SELECT * FROM receipts WHERE transaction_ref = ? OR tx_hash = ? LIMIT 1"
+          );
+          const row = stmt.get(txRef, txRef) as DbRow | undefined;
+          return row ? rowToReceipt(row) : null;
+        },
+        catch: (e) => internalError(`Failed to look up receipt by txRef: ${e}`),
       }),
   })
 );

@@ -214,6 +214,7 @@ server.get<{
 }>("/article/:id", async (request, reply) => {
   const { id } = request.params;
   const sessionTokenId = extractSessionToken(request.headers.authorization);
+  console.log(`[/article/${id}] → session=${sessionTokenId ? sessionTokenId.slice(0, 8) + "…" : "<none>"}`);
 
   const result = await runWorkflow(getArticle({ 
     articleId: id, 
@@ -226,6 +227,7 @@ server.get<{
     // Special handling for 402 responses
     if (error._tag === "PaymentRequiredError") {
       const paymentError = error as PaymentRequiredError;
+      console.log(`[/article/${id}] 402 challengeId=${paymentError.challenge.challengeId}`);
       reply.header("X-Payment-Required", "true");
       reply.header("X-Challenge-Id", paymentError.challenge.challengeId);
       
@@ -242,6 +244,7 @@ server.get<{
     return reply.status(errorToStatusCode(error)).send(error);
   }
 
+  console.log(`[/article/${id}] ✓ fullAccess=${result.data.hasFullAccess}`);
   return result.data;
 });
 
@@ -307,6 +310,8 @@ server.post<{
   Headers: { authorization?: string };
 }>("/pay/verify", async (request, reply) => {
   const { challengeId, txHash, transactionRef, payerAddress } = request.body ?? {};
+  const txRef = txHash || transactionRef || "<none>";
+  console.log(`[/pay/verify] → challengeId=${challengeId} txRef=${txRef} payer=${payerAddress ?? "<none>"}`);
 
   if (!challengeId) {
     return reply.status(400).send({
@@ -343,9 +348,11 @@ server.post<{
   );
 
   if (!result.ok) {
+    console.log(`[/pay/verify] ✗ challengeId=${challengeId} txRef=${txRef} error=${result.error.message}`);
     return reply.status(errorToStatusCode(result.error)).send(result.error);
   }
 
+  console.log(`[/pay/verify] ✓ challengeId=${challengeId} txRef=${txRef} receiptId=${result.data.receipt.receiptId} credits=${result.data.sessionToken.credits}`);
   return {
     success: true,
     receipt: result.data.receipt,
