@@ -4,7 +4,6 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Newspaper,
   ArrowRight,
@@ -20,7 +19,6 @@ import {
   Copy,
   Check,
   Lock,
-  Globe,
   FileCheck,
   ShieldCheck,
 } from "lucide-react";
@@ -51,7 +49,7 @@ export default function LandingPage() {
   return (
     <div className="-mt-16">
       {/* ═══ HERO ═══════════════════════════════════════════ */}
-      <section className="gradient-hero relative overflow-hidden pt-32 pb-24 sm:pt-40 sm:pb-32">
+      <section className="gradient-hero relative overflow-hidden pt-36 pb-28 sm:pt-44 sm:pb-36">
         <div className="absolute inset-0 grid-pattern opacity-20" />
         <div className="absolute top-20 left-1/4 w-96 h-96 bg-blue-500/20 rounded-full blur-[120px]" />
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-violet-500/20 rounded-full blur-[120px]" />
@@ -119,9 +117,9 @@ export default function LandingPage() {
       </section>
 
       {/* ═══ PAYMENT FLOW ═══════════════════════════════════ */}
-      <section className="py-20 sm:py-28 bg-background">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="text-center mb-16">
+      <section className="py-24 sm:py-32 bg-background">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <div className="text-center mb-14">
             <Badge variant="muted" className="mb-4">
               Payment Flow
             </Badge>
@@ -129,77 +127,54 @@ export default function LandingPage() {
               From request to receipt in seconds
             </h2>
             <p className="mt-4 text-muted-foreground max-w-xl mx-auto">
-              A six-step flow that turns any HTTP resource into a paid endpoint
-              with onchain proof at every step.
+              Four steps turn any HTTP resource into a paid endpoint
+              with onchain proof.
             </p>
           </div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
               {
                 step: "1",
                 title: "Request",
-                desc: "Client makes a standard HTTP request to a protected resource.",
                 code: "GET /article/42",
                 color: "from-blue-500 to-blue-600",
               },
               {
                 step: "2",
                 title: "402 Challenge",
-                desc: "Server responds with a payment challenge containing amount, address, and chain details.",
                 code: "HTTP 402 + Challenge",
                 color: "from-violet-500 to-violet-600",
               },
               {
                 step: "3",
-                title: "Payment Sheet",
-                desc: "Decagon renders a checkout UI. User reviews policy, confirms, and signs the transaction.",
-                code: "<PaymentSheet />",
-                color: "from-indigo-500 to-indigo-600",
-              },
-              {
-                step: "4",
-                title: "Onchain Confirm",
-                desc: "Transaction is sent to Plasma and confirmed in under 2 seconds.",
-                code: "eth_sendTransaction",
-                color: "from-cyan-500 to-cyan-600",
-              },
-              {
-                step: "5",
                 title: "Receipt",
-                desc: "Server verifies the tx, mints credits, and issues a receipt with txHash and block number.",
                 code: "POST /pay/verify",
                 color: "from-emerald-500 to-emerald-600",
               },
               {
-                step: "6",
+                step: "4",
                 title: "Access Granted",
-                desc: "Full content is returned. Session token persists for future unlocks without re-paying.",
                 code: "200 OK + Content",
                 color: "from-green-500 to-green-600",
               },
             ].map((s, i) => (
               <div key={s.step} className="relative">
                 <Card className="h-full hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
-                  <CardContent className="p-5 pt-5">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div
-                        className={`h-8 w-8 rounded-full bg-gradient-to-br ${s.color} flex items-center justify-center text-sm font-bold text-white`}
-                      >
-                        {s.step}
-                      </div>
-                      <h3 className="font-semibold">{s.title}</h3>
+                  <CardContent className="p-5 pt-5 text-center">
+                    <div
+                      className={`mx-auto h-10 w-10 rounded-full bg-gradient-to-br ${s.color} flex items-center justify-center text-sm font-bold text-white mb-3`}
+                    >
+                      {s.step}
                     </div>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      {s.desc}
-                    </p>
+                    <h3 className="font-semibold mb-2">{s.title}</h3>
                     <code className="text-xs font-mono bg-muted px-2 py-1 rounded">
                       {s.code}
                     </code>
                   </CardContent>
                 </Card>
-                {i < 5 && i % 3 !== 2 && (
-                  <ChevronRight className="hidden lg:block absolute -right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground/40" />
+                {i < 3 && (
+                  <ChevronRight className="hidden lg:block absolute -right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground/40 z-10" />
                 )}
               </div>
             ))}
@@ -208,9 +183,9 @@ export default function LandingPage() {
       </section>
 
       {/* ═══ DEVELOPER SDK ══════════════════════════════════ */}
-      <section className="py-20 sm:py-28 bg-muted/30">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="text-center mb-16">
+      <section className="py-24 sm:py-32 bg-muted/30">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <div className="text-center mb-14">
             <Badge variant="muted" className="mb-4">
               <Code2 className="h-3 w-3 mr-1.5" />
               Developer SDK
@@ -224,125 +199,42 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-8">
-            {/* UI SDK */}
+          <div className="grid md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+            {/* Install */}
             <div>
               <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
                 <CreditCard className="h-4 w-4" />
-                UI SDK (React)
+                Install
               </h3>
-              <div className="code-block flex items-center justify-between mb-3">
+              <div className="code-block flex items-center justify-between">
                 <code>pnpm add @decagon/ui</code>
                 <CopyButton text="pnpm add @decagon/ui" />
               </div>
-              <div className="code-block text-sm leading-relaxed">
-                <pre>{`import { PaymentSheet } from "@decagon/ui";
+            </div>
 
-<PaymentSheet
+            {/* Usage */}
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+                <Code2 className="h-4 w-4" />
+                Usage
+              </h3>
+              <div className="code-block text-sm leading-relaxed">
+                <pre>{`<PaymentSheet
   challenge={challenge}
-  config={{
-    apiBase: "https://api.example.com",
-    plasmaChainId: 9746,
-    explorerTxBase: "https://testnet.plasmascan.to/tx/",
-  }}
-  onSuccess={(receipt, session) => {
+  onSuccess={(receipt) => {
     console.log("Paid!", receipt.receiptId);
   }}
-  onClose={() => setOpen(false)}
 />`}</pre>
               </div>
             </div>
-
-            {/* Server middleware */}
-            <div>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
-                <Globe className="h-4 w-4" />
-                Server Middleware
-              </h3>
-              <div className="code-block flex items-center justify-between mb-3">
-                <code>pnpm add @decagon/core @decagon/x402</code>
-                <CopyButton text="pnpm add @decagon/core @decagon/x402" />
-              </div>
-              <div className="code-block text-sm leading-relaxed">
-                <pre>{`import { getArticle, verifyPaymentAndIssueSession }
-  from "@decagon/core";
-
-// GET /article/:id
-const result = await runWorkflow(
-  getArticle({ articleId: id, sessionTokenId })
-);
-
-// Returns 402 + challenge or 200 + content
-if (!result.ok && result.error._tag === "PaymentRequiredError") {
-  return reply.status(402).send({
-    challenge: result.error.challenge,
-  });
-}`}</pre>
-              </div>
-            </div>
-          </div>
-
-          {/* Preview card */}
-          <div className="mt-12">
-            <Card className="overflow-hidden max-w-md mx-auto">
-              <div className="bg-black/5 p-1">
-                <div className="flex gap-1.5 px-3 py-2">
-                  <div className="w-3 h-3 rounded-full bg-red-400/50" />
-                  <div className="w-3 h-3 rounded-full bg-yellow-400/50" />
-                  <div className="w-3 h-3 rounded-full bg-green-400/50" />
-                </div>
-              </div>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <DecagonLogo className="h-6 w-6 text-primary" />
-                    <span className="font-semibold">Decagon Payment</span>
-                  </div>
-                  <Badge variant="secondary">Demo</Badge>
-                </div>
-                <Separator className="mb-4" />
-                <div className="space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Credits</span>
-                    <span className="font-semibold">10</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Price</span>
-                    <span className="font-semibold">$0.50</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Pay with</span>
-                    <span className="font-mono text-xs">0.000283 XPL</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Chain</span>
-                    <Badge variant="outline" className="text-xs">
-                      Plasma Testnet
-                    </Badge>
-                  </div>
-                </div>
-                <Separator className="my-4" />
-                <Button className="w-full gap-2" disabled>
-                  <CreditCard className="h-4 w-4" />
-                  Pay with MetaMask
-                </Button>
-                <Button
-                  variant="secondary"
-                  className="w-full mt-2 gap-2"
-                  disabled
-                >
-                  Pay $0.50 (Demo Mode)
-                </Button>
-              </CardContent>
-            </Card>
           </div>
         </div>
       </section>
 
       {/* ═══ HOW IT WORKS ═══════════════════════════════════ */}
-      <section className="py-20 sm:py-28 bg-background">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="text-center mb-16">
+      <section className="py-24 sm:py-32 bg-background">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <div className="text-center mb-14">
             <Badge variant="muted" className="mb-4">
               How It Works
             </Badge>
@@ -404,8 +296,8 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
             ))}
           </div>
 
-          {/* Additional trust signals */}
-          <div className="mt-12 grid sm:grid-cols-3 gap-6">
+          {/* Trust signals */}
+          <div className="mt-10 grid sm:grid-cols-3 gap-6">
             {[
               {
                 icon: FileCheck,
@@ -443,9 +335,9 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
       </section>
 
       {/* ═══ LIVE DEMOS ═════════════════════════════════════ */}
-      <section className="py-20 sm:py-28 bg-muted/30">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <div className="text-center mb-16">
+      <section className="py-24 sm:py-32 bg-muted/30">
+        <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <div className="text-center mb-14">
             <Badge variant="muted" className="mb-4">
               Live Demos
             </Badge>
@@ -462,8 +354,8 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
             {/* News Paywall Demo */}
             <Link href="/news" className="no-underline group">
               <Card className="h-full overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-                <div className="h-48 gradient-primary flex items-center justify-center relative">
-                  <Newspaper className="h-20 w-20 text-white/70" />
+                <div className="h-44 gradient-primary flex items-center justify-center relative">
+                  <Newspaper className="h-16 w-16 text-white/70" />
                   <div className="absolute top-4 right-4">
                     <Badge className="bg-white/20 text-white border-white/30">
                       HTTP 402
@@ -474,10 +366,9 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
                   <h3 className="text-xl font-bold mb-2 group-hover:text-primary transition-colors">
                     News Paywall Demo
                   </h3>
-                  <p className="text-muted-foreground mb-6 leading-relaxed">
+                  <p className="text-muted-foreground mb-6 leading-relaxed text-sm">
                     A premium publisher with article-level micropayments. Browse
-                    free previews, then pay $0.50 to $1.00 to unlock full
-                    articles. Credits persist across sessions.
+                    free previews, then pay to unlock full articles.
                   </p>
                   <Button className="w-full gap-2 group-hover:shadow-md transition-shadow">
                     Open Demo
@@ -490,8 +381,8 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
             {/* Remittance Demo */}
             <Link href="/remittance" className="no-underline group">
               <Card className="h-full overflow-hidden hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
-                <div className="h-48 bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center relative">
-                  <Send className="h-20 w-20 text-white/70" />
+                <div className="h-44 bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center relative">
+                  <Send className="h-16 w-16 text-white/70" />
                   <div className="absolute top-4 right-4">
                     <Badge className="bg-white/20 text-white border-white/30">
                       Remittance
@@ -502,10 +393,9 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
                   <h3 className="text-xl font-bold mb-2 group-hover:text-primary transition-colors">
                     Remittance Demo
                   </h3>
-                  <p className="text-muted-foreground mb-6 leading-relaxed">
-                    Send stablecoin payments to any Plasma address using the
-                    same Decagon Payment Sheet. Full receipts, spend policy
-                    enforcement, and transaction history.
+                  <p className="text-muted-foreground mb-6 leading-relaxed text-sm">
+                    Send stablecoin payments to any Plasma address with full
+                    receipts, spend policy enforcement, and history.
                   </p>
                   <Button
                     variant="outline"
@@ -522,13 +412,13 @@ if (!result.ok && result.error._tag === "PaymentRequiredError") {
       </section>
 
       {/* ═══ CTA ════════════════════════════════════════════ */}
-      <section className="py-20 sm:py-28 bg-background">
+      <section className="py-24 sm:py-32 bg-background">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 text-center">
           <DecagonLogo className="h-12 w-12 text-primary mx-auto mb-6" />
           <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-4">
             Ready to add payments?
           </h2>
-          <p className="text-muted-foreground mb-8 max-w-lg mx-auto">
+          <p className="text-muted-foreground mb-10 max-w-lg mx-auto">
             Decagon makes it trivial to monetize any HTTP resource with onchain
             payments on Plasma. Try the demos or start building with the SDK.
           </p>

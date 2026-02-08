@@ -407,7 +407,7 @@ export default function RemittancePage() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button
                 size="xl"
-                className="gap-2 shadow-lg"
+                className="gap-2 shadow-lg shadow-primary/25"
                 onClick={() => setAuthOpen(true)}
               >
                 Get Started <ArrowRight className="h-5 w-5" />
@@ -415,7 +415,7 @@ export default function RemittancePage() {
               <Button
                 size="xl"
                 variant="outline"
-                className="gap-2 border-white/20 text-white hover:bg-white/10"
+                className="gap-2 border-white/25 text-white hover:bg-white/10 bg-transparent"
                 onClick={() => {
                   const session = createDemoSession(
                     "advanced@decagon.demo",
