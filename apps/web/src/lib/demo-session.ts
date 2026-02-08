@@ -5,8 +5,15 @@
  * Generates a deterministic demo wallet address from the user's email.
  * Stores session in localStorage (purely cosmetic, no real auth).
  *
- * ⚠️  DEMO MODE: not a real authentication system.
+ * DEMO MODE: not a real authentication system.
  */
+
+export interface DemoCard {
+  last4: string;
+  brand: string;
+  expiry: string;
+  holder: string;
+}
 
 export interface DemoUser {
   email: string;
@@ -15,13 +22,18 @@ export interface DemoUser {
   walletAddress: string;
   authMethod: "email" | "google";
   createdAt: string;
+  /** Onboarding extras */
+  fullName?: string;
+  country?: string;
+  kycComplete?: boolean;
+  card?: DemoCard;
 }
 
 const DEMO_SESSION_KEY = "decagon_demo_session";
 
 /* ---------- helpers ---------- */
 
-/** Simple hash → hex string (deterministic, not cryptographic) */
+/** Simple hash -> hex string (deterministic, not cryptographic) */
 function simpleHash(str: string): string {
   let h = 0;
   for (let i = 0; i < str.length; i++) {
@@ -71,6 +83,14 @@ export function createDemoSession(
   };
   localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(user));
   return user;
+}
+
+export function updateDemoSession(patch: Partial<DemoUser>): DemoUser | null {
+  const current = getDemoSession();
+  if (!current) return null;
+  const updated = { ...current, ...patch };
+  localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(updated));
+  return updated;
 }
 
 export function clearDemoSession(): void {
