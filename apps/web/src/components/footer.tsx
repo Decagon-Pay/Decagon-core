@@ -45,6 +45,11 @@ export function Footer() {
             <h4 className="font-semibold text-sm mb-3">Developer</h4>
             <ul className="space-y-2 text-sm">
               <li>
+                <Link href="/sdk-docs" className="text-muted-foreground hover:text-foreground no-underline transition-colors">
+                  SDK Docs
+                </Link>
+              </li>
+              <li>
                 <Link href="/settings" className="text-muted-foreground hover:text-foreground no-underline transition-colors">
                   Settings
                 </Link>

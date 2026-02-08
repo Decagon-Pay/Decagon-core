@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { label: "News Demo", href: "/news" },
   { label: "Remittance", href: "/remittance" },
   { label: "Agents", href: "/agents" },
+  { label: "SDK Docs", href: "/sdk-docs" },
   { label: "Settings", href: "/settings" },
 ];
 

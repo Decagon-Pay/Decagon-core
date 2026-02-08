@@ -97,9 +97,9 @@ const SqliteCapabilities = Layer.mergeAll(
   MockClock,                // Stateless
   MockIdGen,                // Stateless
   MockLogger,               // Stateless (could add file logging later)
-  MockPaymentVerifier,      // TODO: Use live verifier for on-chain
+  MockPaymentVerifier,      // Stateless mock (swap for LivePaymentVerifier)
   MockChainConfig,          // Config from env
-  MockPlasmaRpc,            // TODO: Use live RPC
+  MockPlasmaRpc,            // Stateless mock (swap for LivePlasmaRpc)
 );
 
 // Choose capabilities based on mode

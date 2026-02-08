@@ -2,7 +2,13 @@
   "name": "@decagon/x402",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "HTTP 402 protocol types for Decagon",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/decagon-protocol/decagon-core.git",
+    "directory": "packages/x402"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

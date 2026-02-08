@@ -2,7 +2,13 @@
   "name": "decagon",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Pay-per-use payment layer for the web using HTTP 402 and stablecoins",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/decagon-protocol/decagon-core.git"
+  },
+  "keywords": ["http-402", "payments", "plasma", "stablecoins", "web3"],
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
