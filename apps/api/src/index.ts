@@ -2,20 +2,66 @@
  * Decagon API Server
  * 
  * Fastify HTTP server that serves as the edge layer.
- * Route handlers parse requests, call core workflows, and map results to HTTP responses.
+ * Implements HTTP 402 payment flow with session tokens, credits, and policy enforcement.
+ * 
+ * Supports two modes:
+ * - Mock mode (default in dev): In-memory stores for quick testing
+ * - SQLite mode (USE_SQLITE=true): Persistent SQLite storage for production
  */
 
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import {
   getArticle,
   listArticles,
-  createPaymentChallenge,
-  mockVerifyPayment,
+  verifyPaymentAndIssueSession,
+  getBalance,
+  getUserPolicy,
+  setUserPolicy,
+  createAgent,
+  listAgents,
+  getAgentByToken,
+  checkPaymentPolicy,
+  recordSpend,
+  createTransfer,
+  verifyTransfer,
   MockCapabilities,
+  MockArticlesStore,
+  MockChallengesStore,
+  MockClock,
+  MockIdGen,
+  MockLogger,
+  MockPaymentVerifier,
+  MockChainConfig,
+  MockPlasmaRpc,
 } from "@decagon/core";
-import type { ApiError, PaymentRequiredResponse } from "@decagon/x402";
+import type { ApiError, PaymentRequiredError, SpendPolicy } from "@decagon/x402";
+import { DEFAULT_SPEND_POLICY, TOPUP_PRICE_CENTS } from "@decagon/x402";
+import {
+  LiveReceiptsStore,
+  LivePolicyStore,
+  LiveAgentStore,
+  LiveUsageStore,
+  getDb,
+  closeDb,
+} from "./sqlite/index.js";
+
+// ============================================
+// Environment Configuration
+// ============================================
+
+const USE_SQLITE = process.env["USE_SQLITE"] === "true" || process.env["NODE_ENV"] === "production";
+const PORT = parseInt(process.env["PORT"] ?? "4000", 10);
+const HOST = process.env["HOST"] ?? "0.0.0.0";
+
+// CORS origins
+const ALLOWED_ORIGINS = process.env["ALLOWED_ORIGINS"]
+  ? process.env["ALLOWED_ORIGINS"].split(",").map((s) => s.trim())
+  : ["http://localhost:3000", "http://localhost:3001"];
+
+console.log(`[Config] USE_SQLITE: ${USE_SQLITE}`);
+console.log(`[Config] ALLOWED_ORIGINS: ${ALLOWED_ORIGINS.join(", ")}`);
 
 // ============================================
 // Server Setup
@@ -27,33 +73,65 @@ const server = Fastify({
 
 // Enable CORS for frontend
 await server.register(cors, {
-  origin: ["http://localhost:3000", "http://localhost:3001"],
+  origin: ALLOWED_ORIGINS,
   methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-User-Id"],
+  exposedHeaders: ["X-Payment-Required", "X-Challenge-Id"],
 });
+
+// ============================================
+// Capability Layer Selection
+// ============================================
+
+/**
+ * SQLite-backed capabilities for production
+ * Uses SQLite for persistent stores, mock for stateless services
+ */
+const SqliteCapabilities = Layer.mergeAll(
+  MockArticlesStore,        // Articles are static
+  LiveReceiptsStore,        // Persistent
+  MockChallengesStore,      // Short-lived, can be in-memory
+  LivePolicyStore,          // Persistent
+  LiveAgentStore,           // Persistent
+  LiveUsageStore,           // Persistent
+  MockClock,                // Stateless
+  MockIdGen,                // Stateless
+  MockLogger,               // Stateless (could add file logging later)
+  MockPaymentVerifier,      // Stateless mock (swap for LivePaymentVerifier)
+  MockChainConfig,          // Config from env
+  MockPlasmaRpc,            // Stateless mock (swap for LivePlasmaRpc)
+);
+
+// Choose capabilities based on mode
+const Capabilities = USE_SQLITE ? SqliteCapabilities : MockCapabilities;
+
+// Initialize SQLite if enabled
+if (USE_SQLITE) {
+  console.log("[SQLite] Initializing database...");
+  getDb(); // This creates tables if needed
+}
 
 // ============================================
 // Effect Runtime Helper
 // ============================================
 
 /**
- * Run an Effect workflow with mock capabilities and convert to Promise
+ * Run an Effect workflow with capabilities and convert to Promise
  */
 const runWorkflow = <A, E extends ApiError>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   effect: Effect.Effect<A, E, never> | Effect.Effect<A, E, any>
 ): Promise<{ ok: true; data: A } | { ok: false; error: E }> =>
   Effect.runPromiseExit(
-    Effect.provide(effect as Effect.Effect<A, E, never>, MockCapabilities)
+    Effect.provide(effect as Effect.Effect<A, E, never>, Capabilities)
   ).then((exit) => {
     if (Exit.isSuccess(exit)) {
       return { ok: true as const, data: exit.value };
     } else {
       const cause = exit.cause;
-      // Extract the error from the cause
       if (cause._tag === "Fail") {
         return { ok: false as const, error: cause.error as E };
       }
-      // Unexpected error
       return {
         ok: false as const,
         error: {
@@ -88,6 +166,30 @@ const errorToStatusCode = (error: ApiError): number => {
   }
 };
 
+/**
+ * Extract session token from Authorization header
+ */
+const extractSessionToken = (authHeader: string | undefined): string | undefined => {
+  if (!authHeader) return undefined;
+  const match = authHeader.match(/^Bearer\s+(\S+)$/i);
+  return match ? match[1] : undefined;
+};
+
+/**
+ * Extract agent token from Authorization header (starts with "agt_")
+ */
+const extractAgentToken = (authHeader: string | undefined): string | undefined => {
+  const token = extractSessionToken(authHeader);
+  return token?.startsWith("agt_") ? token : undefined;
+};
+
+/**
+ * Get user ID from header or default to "demo-user"
+ */
+const getUserId = (request: { headers: { "x-user-id"?: string } }): string => {
+  return request.headers["x-user-id"] ?? "demo-user";
+};
+
 // ============================================
 // Routes
 // ============================================
@@ -100,26 +202,54 @@ server.get("/health", async () => {
 });
 
 /**
- * Get article by ID
- * For Step 1: Always returns preview content (200)
- * In Step 2: Will return 402 when payment is required
+ * Get article by ID - HTTP 402 flow
+ * - No session token → 402 with PaymentChallenge
+ * - Expired session → 402 with PaymentChallenge
+ * - Insufficient credits → 402 with PaymentChallenge
+ * - Valid session with credits → 200 with full content (1 credit consumed)
  */
 server.get<{
   Params: { id: string };
+  Headers: { authorization?: string };
 }>("/article/:id", async (request, reply) => {
   const { id } = request.params;
+  const sessionTokenId = extractSessionToken(request.headers.authorization);
+  console.log(`[/article/${id}] → session=${sessionTokenId ? sessionTokenId.slice(0, 8) + "…" : "<none>"}`);
 
-  const result = await runWorkflow(getArticle({ articleId: id }));
+  const result = await runWorkflow(getArticle({ 
+    articleId: id, 
+    sessionTokenId 
+  }));
 
   if (!result.ok) {
-    return reply.status(errorToStatusCode(result.error)).send(result.error);
+    const error = result.error;
+    
+    // Special handling for 402 responses
+    if (error._tag === "PaymentRequiredError") {
+      const paymentError = error as PaymentRequiredError;
+      console.log(`[/article/${id}] 402 challengeId=${paymentError.challenge.challengeId}`);
+      reply.header("X-Payment-Required", "true");
+      reply.header("X-Challenge-Id", paymentError.challenge.challengeId);
+      
+      return reply.status(402).send({
+        status: 402,
+        message: paymentError.message,
+        challenge: paymentError.challenge,
+        acceptedPaymentMethods: [
+          { type: "usdt", name: "USDT on Plasma", available: true },
+        ],
+      });
+    }
+    
+    return reply.status(errorToStatusCode(error)).send(error);
   }
 
+  console.log(`[/article/${id}] ✓ fullAccess=${result.data.hasFullAccess}`);
   return result.data;
 });
 
 /**
- * List all articles
+ * List all articles (preview only, no auth required)
  */
 server.get("/articles", async (request, reply) => {
   const result = await runWorkflow(listArticles());
@@ -132,64 +262,382 @@ server.get("/articles", async (request, reply) => {
 });
 
 /**
- * Request credits top-up (creates a payment challenge)
- * POST /credits/topup
+ * Get current credit balance
+ * GET /credits/balance
  */
-server.post<{
-  Body: { articleId: string };
-}>("/credits/topup", async (request, reply) => {
-  const { articleId } = request.body ?? { articleId: "article-1" };
+server.get<{
+  Headers: { authorization?: string };
+}>("/credits/balance", async (request, reply) => {
+  const sessionTokenId = extractSessionToken(request.headers.authorization);
 
-  const result = await runWorkflow(createPaymentChallenge({ articleId }));
+  if (!sessionTokenId) {
+    return reply.status(401).send({
+      _tag: "ValidationError",
+      message: "Authorization header required",
+      timestamp: new Date().toISOString(),
+      field: "Authorization",
+      reason: "Missing Bearer token",
+    });
+  }
+
+  const result = await runWorkflow(getBalance(sessionTokenId));
 
   if (!result.ok) {
     return reply.status(errorToStatusCode(result.error)).send(result.error);
   }
 
-  // Return the challenge as a PaymentRequiredResponse structure
-  const response: PaymentRequiredResponse = {
-    status: 402,
-    message: "Payment required to access this content",
-    challenge: result.data,
-    preview: {
-      text: "Premium content preview...",
-      hasMore: true,
-      previewPercent: 20,
-    },
-    acceptedPaymentMethods: [
-      { type: "plasma", name: "Plasma Stablecoin", available: false },
-      { type: "session_credit", name: "Session Credits", available: true },
-    ],
+  return {
+    credits: result.data.credits,
+    expiresAt: result.data.expiresAt,
   };
-
-  return response;
 });
 
 /**
- * Verify payment and get receipt + session token
+ * Verify payment and issue/update session with credits
  * POST /pay/verify
+ * 
+ * Accepts either:
+ * - txHash: actual blockchain transaction hash
+ * - transactionRef + payerAddress: legacy mock payment
  */
 server.post<{
   Body: {
     challengeId: string;
-    resourceId: string;
+    txHash?: string;
     transactionRef?: string;
+    payerAddress?: string;
   };
+  Headers: { authorization?: string };
 }>("/pay/verify", async (request, reply) => {
-  const { challengeId, resourceId, transactionRef } = request.body ?? {};
+  const { challengeId, txHash, transactionRef, payerAddress } = request.body ?? {};
+  const txRef = txHash || transactionRef || "<none>";
+  console.log(`[/pay/verify] → challengeId=${challengeId} txRef=${txRef} payer=${payerAddress ?? "<none>"}`);
 
-  if (!challengeId || !resourceId) {
+  if (!challengeId) {
     return reply.status(400).send({
       _tag: "ValidationError",
-      message: "Missing required fields: challengeId, resourceId",
+      message: "Missing required field: challengeId",
       timestamp: new Date().toISOString(),
       field: "body",
-      reason: "Missing required fields",
+      reason: "Missing challengeId",
     });
   }
 
-  // For Step 1, use mock verification that always succeeds
-  const result = await runWorkflow(mockVerifyPayment(challengeId, resourceId));
+  // Must have either txHash or transactionRef
+  if (!txHash && !transactionRef) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: txHash or transactionRef",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing payment proof",
+    });
+  }
+
+  // Check if there's an existing session token to add credits to
+  const existingSessionTokenId = extractSessionToken(request.headers.authorization);
+
+  const result = await runWorkflow(
+    verifyPaymentAndIssueSession({
+      challengeId,
+      txHash,
+      transactionRef,
+      payerAddress,
+      existingSessionTokenId,
+    })
+  );
+
+  if (!result.ok) {
+    console.log(`[/pay/verify] ✗ challengeId=${challengeId} txRef=${txRef} error=${result.error.message}`);
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+
+  console.log(`[/pay/verify] ✓ challengeId=${challengeId} txRef=${txRef} receiptId=${result.data.receipt.receiptId} credits=${result.data.sessionToken.credits}`);
+  return {
+    success: true,
+    receipt: result.data.receipt,
+    sessionToken: result.data.sessionToken,
+    message: `Payment verified! You now have ${result.data.sessionToken.credits} credits.`,
+  };
+});
+
+// ============================================
+// Policy Management Routes
+// ============================================
+
+/**
+ * Get current spend policy for user
+ * GET /policy
+ */
+server.get<{
+  Headers: { "x-user-id"?: string };
+}>("/policy", async (request, reply) => {
+  const userId = getUserId(request);
+  
+  const result = await runWorkflow(getUserPolicy(userId));
+  
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+  
+  return {
+    userId,
+    policy: result.data,
+  };
+});
+
+/**
+ * Set spend policy for user
+ * POST /policy
+ */
+server.post<{
+  Body: {
+    policy?: Partial<SpendPolicy>;
+  };
+  Headers: { "x-user-id"?: string };
+}>("/policy", async (request, reply) => {
+  const userId = getUserId(request);
+  const policyInput = request.body?.policy ?? {};
+  
+  // Merge with defaults
+  const policy: SpendPolicy = {
+    maxPerActionCents: policyInput.maxPerActionCents ?? DEFAULT_SPEND_POLICY.maxPerActionCents,
+    dailyCapCents: policyInput.dailyCapCents ?? DEFAULT_SPEND_POLICY.dailyCapCents,
+    autoApproveUnderCents: policyInput.autoApproveUnderCents ?? DEFAULT_SPEND_POLICY.autoApproveUnderCents,
+    requireConfirmAboveCents: policyInput.requireConfirmAboveCents ?? DEFAULT_SPEND_POLICY.requireConfirmAboveCents,
+    allowedOrigins: policyInput.allowedOrigins ?? DEFAULT_SPEND_POLICY.allowedOrigins,
+    allowedPaths: policyInput.allowedPaths ?? DEFAULT_SPEND_POLICY.allowedPaths,
+  };
+  
+  const result = await runWorkflow(setUserPolicy(userId, policy));
+  
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+  
+  return {
+    ok: true,
+    userId,
+    policy: result.data,
+  };
+});
+
+/**
+ * Check policy for a proposed payment
+ * POST /policy/check
+ */
+server.post<{
+  Body: {
+    amountCents?: number;
+    path?: string;
+  };
+  Headers: { authorization?: string; "x-user-id"?: string; origin?: string };
+}>("/policy/check", async (request, reply) => {
+  const userId = getUserId(request);
+  const agentToken = extractAgentToken(request.headers.authorization);
+  const amountCents = request.body?.amountCents ?? TOPUP_PRICE_CENTS;
+  const path = request.body?.path ?? "/article/*";
+  const origin = request.headers.origin;
+  
+  const result = await runWorkflow(
+    checkPaymentPolicy({
+      amountCents,
+      origin,
+      path,
+      userId: agentToken ? undefined : userId,
+      agentToken,
+    })
+  );
+  
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+  
+  if (!result.data.allowed) {
+    return reply.status(403).send({
+      allowed: false,
+      error: result.data.error,
+      policy: result.data.policy,
+      currentDailySpend: result.data.currentDailySpend,
+    });
+  }
+  
+  return {
+    allowed: true,
+    needsConfirm: result.data.needsConfirm,
+    subjectType: result.data.subjectType,
+    subjectId: result.data.subjectId,
+    policy: result.data.policy,
+    currentDailySpend: result.data.currentDailySpend,
+  };
+});
+
+// ============================================
+// Agent Management Routes
+// ============================================
+
+/**
+ * Create a new agent
+ * POST /agent/create
+ */
+server.post<{
+  Body: {
+    name?: string;
+    policy?: Partial<SpendPolicy>;
+  };
+  Headers: { "x-user-id"?: string };
+}>("/agent/create", async (request, reply) => {
+  const userId = getUserId(request);
+  const name = request.body?.name ?? `Agent ${Date.now()}`;
+  const policyInput = request.body?.policy ?? {};
+  
+  // Default agent policy is stricter than user policy
+  const policy: SpendPolicy = {
+    maxPerActionCents: policyInput.maxPerActionCents ?? 100,     // $1 max per action
+    dailyCapCents: policyInput.dailyCapCents ?? 500,             // $5 daily cap
+    autoApproveUnderCents: policyInput.autoApproveUnderCents ?? 50, // Auto-approve under $0.50
+    requireConfirmAboveCents: policyInput.requireConfirmAboveCents ?? 100, // Confirm over $1
+    allowedOrigins: policyInput.allowedOrigins ?? ["*"],
+    allowedPaths: policyInput.allowedPaths ?? ["/article/*"],    // Only articles by default
+  };
+  
+  const result = await runWorkflow(createAgent({ userId, name, policy }));
+  
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+  
+  return {
+    ok: true,
+    agentId: result.data.agentId,
+    agentToken: result.data.agentToken,
+    name: result.data.name,
+    policy: result.data.policy,
+    curl: `curl -H "Authorization: Bearer ${result.data.agentToken}" http://localhost:4000/article/article-1`,
+  };
+});
+
+/**
+ * List agents for user
+ * GET /agent/list
+ */
+server.get<{
+  Headers: { "x-user-id"?: string };
+}>("/agent/list", async (request, reply) => {
+  const userId = getUserId(request);
+  
+  const result = await runWorkflow(listAgents(userId));
+  
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+  
+  return {
+    userId,
+    agents: result.data.map(agent => ({
+      agentId: agent.agentId,
+      name: agent.name,
+      policy: agent.policy,
+      createdAt: agent.createdAt,
+      lastUsedAt: agent.lastUsedAt,
+      // Don't expose full token in list, just preview
+      tokenPreview: agent.agentToken.slice(0, 12) + "...",
+    })),
+  };
+});
+
+// ============================================
+// Transfer / Remittance Routes
+// ============================================
+
+server.post<{
+  Body: {
+    recipientAddress?: string;
+    amountCents?: number;
+    note?: string;
+  };
+  Headers: { "x-user-id"?: string };
+}>("/transfer/create", async (request, reply) => {
+  const userId = getUserId(request);
+  const { recipientAddress, amountCents, note } = request.body ?? {};
+
+  if (!recipientAddress) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: recipientAddress",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing recipientAddress",
+    });
+  }
+
+  const result = await runWorkflow(
+    createTransfer({
+      senderUserId: userId,
+      recipientAddress,
+      amountCents: amountCents ?? TOPUP_PRICE_CENTS,
+      note,
+    })
+  );
+
+  if (!result.ok) {
+    return reply.status(errorToStatusCode(result.error)).send(result.error);
+  }
+
+  return {
+    status: 402,
+    message: "Payment required to complete transfer",
+    challenge: result.data.challenge,
+    recipientAddress: result.data.recipientAddress,
+    note: result.data.note,
+    acceptedPaymentMethods: [
+      { type: "plasma", name: "XPL on Plasma", available: true },
+    ],
+  };
+});
+
+server.post<{
+  Body: {
+    challengeId: string;
+    txHash?: string;
+    transactionRef?: string;
+    payerAddress?: string;
+  };
+  Headers: { authorization?: string };
+}>("/transfer/verify", async (request, reply) => {
+  const { challengeId, txHash, transactionRef, payerAddress } = request.body ?? {};
+
+  if (!challengeId) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: challengeId",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing challengeId",
+    });
+  }
+
+  if (!txHash && !transactionRef) {
+    return reply.status(400).send({
+      _tag: "ValidationError",
+      message: "Missing required field: txHash or transactionRef",
+      timestamp: new Date().toISOString(),
+      field: "body",
+      reason: "Missing payment proof",
+    });
+  }
+
+  const existingSessionTokenId = extractSessionToken(request.headers.authorization);
+
+  const result = await runWorkflow(
+    verifyTransfer({
+      challengeId,
+      txHash,
+      transactionRef,
+      payerAddress,
+      existingSessionTokenId,
+    })
+  );
 
   if (!result.ok) {
     return reply.status(errorToStatusCode(result.error)).send(result.error);
@@ -199,32 +647,69 @@ server.post<{
     success: true,
     receipt: result.data.receipt,
     sessionToken: result.data.sessionToken,
-    message: "Payment verified! You now have access to the content.",
+    message: "Transfer verified and confirmed on-chain.",
   };
+});
+
+server.get<{
+  Headers: { "x-user-id"?: string };
+}>("/transfer/history", async (request, reply) => {
+  if (!USE_SQLITE) {
+    return { transfers: [] };
+  }
+  try {
+    const db = getDb();
+    const userId = getUserId(request);
+    const rows = db.prepare(
+      `SELECT * FROM receipts WHERE resourceId LIKE 'transfer:%' ORDER BY verifiedAt DESC LIMIT 50`
+    ).all() as Array<Record<string, unknown>>;
+    return { transfers: rows };
+  } catch {
+    return { transfers: [] };
+  }
 });
 
 // ============================================
 // Start Server
 // ============================================
 
-const PORT = process.env["PORT"] ? parseInt(process.env["PORT"], 10) : 4000;
-const HOST = process.env["HOST"] ?? "0.0.0.0";
+const serverPort = PORT;
+const serverHost = HOST;
 
 try {
-  await server.listen({ port: PORT, host: HOST });
+  await server.listen({ port: serverPort, host: serverHost });
   console.log(`
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
 ║   🔷 Decagon API Server                                       ║
 ║                                                               ║
-║   Running at: http://localhost:${PORT}                          ║
+║   Running at: http://localhost:${serverPort}                          ║
+║   Mode: ${USE_SQLITE ? "SQLite (persistent)" : "Mock (in-memory)"}                                  ║
 ║                                                               ║
-║   Endpoints:                                                  ║
-║     GET  /health          - Health check                      ║
-║     GET  /articles        - List all articles                 ║
-║     GET  /article/:id     - Get article by ID                 ║
-║     POST /credits/topup   - Create payment challenge          ║
-║     POST /pay/verify      - Verify payment (mock)             ║
+║   HTTP 402 Payment Flow:                                      ║
+║     GET  /article/:id     → 402 + challenge (no credits)      ║
+║                           → 200 + full content (has credits)  ║
+║                                                               ║
+║   Session Management:                                         ║
+║     GET  /credits/balance → Current credit balance            ║
+║     POST /pay/verify      → Verify payment, get session       ║
+║                                                               ║
+║   Policy Management:                                          ║
+║     GET  /policy          → Get spend policy                  ║
+║     POST /policy          → Set spend policy                  ║
+║     POST /policy/check    → Check if payment allowed          ║
+║                                                               ║
+║   Agent Management:                                           ║
+║     POST /agent/create    → Create agent token                ║
+║     GET  /agent/list      → List agents                       ║
+║                                                               ║
+║   Remittance:                                                 ║
+║     POST /transfer/create → Create transfer challenge         ║
+║     POST /transfer/verify → Verify transfer payment           ║
+║     GET  /transfer/history→ Transfer history                  ║
+║                                                               ║
+║   Authorization: Bearer <sessionTokenId|agentToken>           ║
+║   User ID: x-user-id header (default: demo-user)              ║
 ║                                                               ║
 ╚═══════════════════════════════════════════════════════════════╝
   `);

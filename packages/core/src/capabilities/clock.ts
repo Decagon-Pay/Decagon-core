@@ -32,6 +32,11 @@ export interface Clock {
   readonly futureMinutes: (minutes: number) => Effect.Effect<string, never>;
 
   /**
+   * Get a timestamp N hours in the future
+   */
+  readonly futureHours: (hours: number) => Effect.Effect<string, never>;
+
+  /**
    * Check if a timestamp has passed
    */
   readonly isPast: (isoTimestamp: string) => Effect.Effect<boolean, never>;

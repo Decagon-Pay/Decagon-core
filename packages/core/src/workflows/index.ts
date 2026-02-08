@@ -11,13 +11,29 @@ export {
 } from "./get-article.js";
 
 export { 
-  createPaymentChallenge,
-  type CreatePaymentChallengeInput 
-} from "./create-payment-challenge.js";
-
-export { 
-  verifyPaymentAndIssueSession, 
-  mockVerifyPayment,
+  verifyPaymentAndIssueSession,
+  getBalance,
   type VerifyPaymentInput,
   type VerifyPaymentOutput 
 } from "./verify-payment.js";
+
+export {
+  getUserPolicy,
+  setUserPolicy,
+  createAgent,
+  getAgentByToken,
+  listAgents,
+  deleteAgent,
+  checkPaymentPolicy,
+  recordSpend,
+  getDailySpend,
+  type PolicyCheckRequest,
+  type PolicyCheckResponse,
+} from "./policy-workflows.js";
+
+export {
+  createTransfer,
+  verifyTransfer,
+  type CreateTransferInput,
+  type TransferChallenge,
+} from "./remittance.js";

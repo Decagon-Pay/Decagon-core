@@ -1,0 +1,14 @@
+node_modules
+.turbo
+.next
+.git
+*.md
+*.txt
+.env
+apps/web
+scripts
+.turbo
+**/.turbo
+**/node_modules
+**/.next
+**/dist

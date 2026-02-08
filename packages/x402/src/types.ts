@@ -6,6 +6,16 @@
  */
 
 // ============================================
+// Constants
+// ============================================
+
+export const CREDITS_PER_UNLOCK = 1;
+export const TOPUP_CREDITS = 100;
+export const TOPUP_PRICE_CENTS = 50;
+export const SESSION_EXPIRY_HOURS = 24;
+export const CHALLENGE_EXPIRY_MINUTES = 10;
+
+// ============================================
 // Payment Challenge (sent with 402 response)
 // ============================================
 
@@ -14,29 +24,31 @@
  * The client must satisfy this challenge to access the resource.
  */
 export interface PaymentChallenge {
-  /** Unique identifier for this payment challenge */
   readonly challengeId: string;
-
-  /** The resource being requested */
   readonly resourceId: string;
-
-  /** Amount required in smallest unit (e.g., cents) */
+  /** Amount in cents for display purposes */
   readonly amountRequired: number;
-
-  /** Currency code (e.g., "USD", "PLASMA") */
   readonly currency: string;
-
-  /** Human-readable description of what's being purchased */
+  readonly chain: string;
   readonly description: string;
-
-  /** Recipient address for payment (placeholder for now) */
   readonly payTo: string;
-
-  /** Challenge expiration timestamp (ISO 8601) */
   readonly expiresAt: string;
-
-  /** Timestamp when challenge was created (ISO 8601) */
   readonly createdAt: string;
+  readonly creditsOffered: number;
+  readonly status: "pending" | "paid" | "expired";
+  
+  /** Chain ID for the payment network (e.g., 9746 for Plasma Testnet) */
+  readonly chainId: number;
+  /** Asset type: "NATIVE" for native token, "ERC20" for tokens */
+  readonly assetType: "NATIVE" | "ERC20";
+  /** Asset symbol (e.g., "XPL" for Plasma native token) */
+  readonly assetSymbol: string;
+  /** Amount in wei (smallest unit) as string to avoid precision issues */
+  readonly amountWei: string;
+  /** Address to receive payment */
+  readonly payeeAddress: string;
+  /** Base URL for transaction explorer (e.g., "https://testnet.plasmascan.to/tx/") */
+  readonly explorerTxBase: string;
 }
 
 // ============================================
@@ -101,29 +113,29 @@ export interface PaymentMethod {
  * Serves as proof that payment was made.
  */
 export interface Receipt {
-  /** Unique receipt identifier */
   readonly receiptId: string;
-
-  /** The challenge that was satisfied */
   readonly challengeId: string;
-
-  /** The resource that was paid for */
   readonly resourceId: string;
-
-  /** Amount that was paid */
   readonly amountPaid: number;
-
-  /** Currency of payment */
   readonly currency: string;
-
-  /** Transaction reference (blockchain tx hash, mock for now) */
   readonly transactionRef: string;
-
-  /** When payment was verified (ISO 8601) */
   readonly verifiedAt: string;
-
-  /** Receipt expiration (ISO 8601) */
   readonly expiresAt: string;
+  readonly creditsPurchased: number;
+  readonly status: "confirmed" | "pending";
+  
+  /** Transaction hash on the blockchain */
+  readonly txHash?: string;
+  /** Full explorer URL for the transaction */
+  readonly explorerUrl?: string;
+  /** Block number where tx was confirmed */
+  readonly blockNumber?: number;
+  /** Amount in native token (e.g., "0.0001 XPL") */
+  readonly amountNative?: string;
+  /** Payer's wallet address */
+  readonly payerAddress?: string;
+  /** Payee's wallet address */
+  readonly payeeAddress?: string;
 }
 
 // ============================================
@@ -135,23 +147,34 @@ export interface Receipt {
  * without individual payment transactions.
  */
 export interface SessionToken {
-  /** Unique session token identifier */
   readonly tokenId: string;
-
-  /** Remaining credit balance */
-  readonly balance: number;
-
-  /** Currency of the balance */
+  readonly credits: number;
   readonly currency: string;
-
-  /** When the session was created (ISO 8601) */
   readonly createdAt: string;
-
-  /** When the session expires (ISO 8601) */
   readonly expiresAt: string;
-
-  /** Number of resources accessed with this session */
   readonly accessCount: number;
+}
+
+export interface BalanceResponse {
+  readonly creditsRemaining: number;
+  readonly currency: string;
+  readonly expiresAt: string;
+}
+
+export interface TopupRequest {
+  readonly credits?: number;
+  readonly plan?: "starter" | "pro";
+}
+
+export interface VerifyRequest {
+  readonly challengeId: string;
+  readonly txHash?: string;
+}
+
+export interface VerifyResponse {
+  readonly receipt: Receipt;
+  readonly sessionToken: SessionToken;
+  readonly creditsRemaining: number;
 }
 
 // ============================================
@@ -230,6 +253,27 @@ export interface ValidationError extends BaseError {
 }
 
 /**
+ * Policy violation error (spend limits exceeded)
+ */
+export interface PolicyViolationError extends BaseError {
+  readonly _tag: "PolicyViolationError";
+  readonly reason: "max_per_action" | "daily_cap" | "origin_blocked" | "path_blocked";
+  readonly limit: number;
+  readonly attempted: number;
+  readonly subjectType: "user" | "agent";
+  readonly subjectId: string;
+}
+
+/**
+ * Agent not authorised error
+ */
+export interface AgentNotAuthorisedError extends BaseError {
+  readonly _tag: "AgentNotAuthorisedError";
+  readonly agentToken: string;
+  readonly reason: string;
+}
+
+/**
  * Union type of all API errors.
  * Use discriminated union pattern with _tag for type narrowing.
  */
@@ -240,7 +284,9 @@ export type ApiError =
   | SessionExpiredError
   | InsufficientCreditsError
   | InternalError
-  | ValidationError;
+  | ValidationError
+  | PolicyViolationError
+  | AgentNotAuthorisedError;
 
 // ============================================
 // Helper type guards
@@ -266,6 +312,77 @@ export const isInternalError = (e: ApiError): e is InternalError =>
 
 export const isValidationError = (e: ApiError): e is ValidationError =>
   e._tag === "ValidationError";
+
+export const isPolicyViolationError = (e: ApiError): e is PolicyViolationError =>
+  e._tag === "PolicyViolationError";
+
+export const isAgentNotAuthorisedError = (e: ApiError): e is AgentNotAuthorisedError =>
+  e._tag === "AgentNotAuthorisedError";
+
+// ============================================
+// Spend Policy (limits + allowlists)
+// ============================================
+
+/**
+ * Spend policy for users or agents.
+ * Controls payment limits and allowed access patterns.
+ */
+export interface SpendPolicy {
+  /** Maximum spend per single action (cents) */
+  readonly maxPerActionCents: number;
+
+  /** Maximum daily spend (cents) */
+  readonly dailyCapCents: number;
+
+  /** Auto-approve payments under this amount (cents) */
+  readonly autoApproveUnderCents: number;
+
+  /** Require confirmation above this amount (cents) */
+  readonly requireConfirmAboveCents: number;
+
+  /** Allowed origins (e.g., ["http://localhost:3000"]) */
+  readonly allowedOrigins: readonly string[];
+
+  /** Allowed paths (e.g., ["/article/*"]) */
+  readonly allowedPaths: readonly string[];
+}
+
+/**
+ * Default spend policy for new users
+ */
+export const DEFAULT_SPEND_POLICY: SpendPolicy = {
+  maxPerActionCents: 500,        // $5 max per action
+  dailyCapCents: 2000,           // $20 daily cap
+  autoApproveUnderCents: 100,    // Auto-approve under $1
+  requireConfirmAboveCents: 200, // Require confirm over $2
+  allowedOrigins: ["*"],         // Allow all origins
+  allowedPaths: ["*"],           // Allow all paths
+};
+
+// ============================================
+// Agent (scoped tokens with policies)
+// ============================================
+
+/**
+ * Agent token for automated/AI access.
+ * Agents have their own spend policies separate from users.
+ */
+export interface Agent {
+  readonly agentId: string;
+  readonly agentToken: string;
+  readonly userId: string;
+  readonly policy: SpendPolicy;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly lastUsedAt?: string;
+}
+
+/**
+ * Policy check result
+ */
+export type PolicyCheckResult = 
+  | { allowed: true; needsConfirm: boolean }
+  | { allowed: false; error: PolicyViolationError };
 
 // ============================================
 // Article types (for content access)

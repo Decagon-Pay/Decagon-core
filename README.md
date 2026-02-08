@@ -1,167 +1,265 @@
-# 🔷 Decagon
+# Decagon — HTTP 402 Payment Layer for Humans & AI Agents
 
-**Pay once, read instantly.**
+> Programmable pay-per-use payments via **HTTP 402 Payment Required** on Plasma Testnet.  
+> Content access, remittance, agent automation — one protocol.
 
-Decagon is a pay-per-use payment layer for the web. It uses HTTP 402 ("Payment Required") and stablecoins to let humans and agents pay once and unlock content instantly — without accounts or subscriptions.
+---
 
-## The Problem
+## What Decagon Does
 
-The web is broken for creators and consumers:
+Decagon is a **general-purpose payment layer** built on HTTP 402.  
+Any resource that costs money returns `402 Payment Required` with a `PaymentChallenge`.  
+The client pays on-chain, submits proof, and gains access.
 
-- **Creators** are forced into advertising (invasive, low CPM) or subscriptions (high friction, commitment)
-- **Consumers** suffer from subscription fatigue — the average person has 12+ active subscriptions
-- **AI Agents** can't access paid content at all — no way to programmatically pay for resources
+**Two demo verticals ship today:**
 
-## The Solution
+| Vertical | Flow |
+|----------|------|
+| **Article Unlock** | `GET /article/:id` → 402 → pay → 200 + premium content |
+| **Remittance** | `POST /transfer/create` → 402 → pay → transfer confirmed |
 
-Decagon enables **micro-payments at the HTTP layer**:
+Both share the same **PaymentSheet** UI component (from `@decagon/ui`), the same **PaymentChallenge** type, and the same **verify** workflow.
 
-1. Request content → Server returns `HTTP 402 Payment Required` with a payment challenge
-2. Pay via stablecoin → Receive a receipt and session token
-3. Access content → Use session token for instant access
+---
 
-No accounts. No subscriptions. Just tap, pay, read.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Decagon Monorepo                        │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│   apps/                                                         │
-│   ├── web/          → Next.js frontend (marketplace UI)         │
-│   └── api/          → Fastify HTTP server (402 handler)         │
-│                                                                 │
-│   packages/                                                     │
-│   ├── x402/         → Protocol types (PaymentChallenge, etc.)   │
-│   └── core/         → Effectful business logic                  │
-│       ├── capabilities/  → Effect service interfaces            │
-│       ├── workflows/     → Pure Effect workflows                │
-│       └── mocks/         → Mock implementations                 │
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Key Design Principles
-
-1. **Effectful Core**: All business logic expressed as pure Effect workflows
-2. **Protocol-First**: HTTP 402 types defined independently of implementation
-3. **Separation of Concerns**: HTTP layer only parses requests and maps responses
-4. **Testable**: All I/O goes through injectable capability interfaces
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| Monorepo | pnpm + Turborepo |
-| Frontend | Next.js (TypeScript) |
-| Backend | Fastify (TypeScript) |
-| Effect System | TypeScript + [effect](https://effect.website) |
-| Database | SQLite (mock for now) |
-| Payments | Plasma stablecoins (mock for now) |
-
-## Quick Start
+## 🚀 Quick Start
 
 ### Prerequisites
+- Node.js 20+, pnpm 9+
+- [MetaMask](https://metamask.io/) with **Plasma Testnet** configured:
+  - RPC: `https://testnet-rpc.plasma.to` · Chain ID: `9746` · Symbol: `ETH`
+- Testnet ETH from [Plasma Faucet](https://faucet.plasma.to/)
 
-- Node.js 18+
-- pnpm 9+
-
-### Installation
+### Local Development
 
 ```bash
-# Clone the repository
-git clone https://github.com/decagon/decagon.git
+git clone https://github.com/Decagon-Pay/decagon-core.git
 cd decagon/Decagon-core
-
-# Install dependencies
 pnpm install
 
-# Start development servers
-pnpm dev
+# Terminal 1 — API server (port 4000)
+cd apps/api && pnpm dev
+
+# Terminal 2 — Web app (port 3000)
+cd apps/web && pnpm dev
 ```
 
-This starts:
-- **Web UI**: http://localhost:3000
-- **API Server**: http://localhost:4000
+### Environment Variables
 
-### Available Commands
-
+**API** (`apps/api/.env`):
 ```bash
-pnpm dev        # Start all services in development mode
-pnpm build      # Build all packages
-pnpm lint       # Lint all packages
-pnpm typecheck  # Type-check all packages
+PORT=4000
+HOST=0.0.0.0
+USE_SQLITE=true               # Persistent storage
+DB_PATH=./data/decagon.db
+ALLOWED_ORIGINS=http://localhost:3000
+PAYEE_ADDRESS=0x...            # Your wallet
+PLASMA_RPC_URL=https://testnet-rpc.plasma.to
 ```
 
-## API Endpoints
+**Web** (`apps/web/.env`):
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:4000
+```
+
+---
+
+## 🔌 API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Health check |
-| GET | `/articles` | List all articles |
-| GET | `/article/:id` | Get article by ID |
-| POST | `/credits/topup` | Create payment challenge |
-| POST | `/pay/verify` | Verify payment (mock) |
+| `GET`  | `/health` | Health check |
+| `GET`  | `/article/:id` | Article access (402-gated) |
+| `GET`  | `/articles` | List all articles |
+| `GET`  | `/credits/balance` | Credit balance |
+| `POST` | `/pay/verify` | Verify payment, issue session |
+| `GET`  | `/policy` | Get spend policy |
+| `POST` | `/policy` | Set spend policy |
+| `POST` | `/policy/check` | Pre-authorize payment |
+| `POST` | `/agent/create` | Create scoped agent token |
+| `GET`  | `/agent/list` | List agents |
+| `POST` | `/transfer/create` | Create remittance transfer |
+| `POST` | `/transfer/verify` | Verify transfer payment |
+| `GET`  | `/transfer/history` | Transfer history |
 
-## HTTP 402 Flow
+### HTTP 402 Flow
 
 ```
-Client                          Server
-  │                               │
-  │  GET /article/123             │
-  │ ─────────────────────────────>│
-  │                               │
-  │  402 Payment Required         │
-  │  { challenge, preview }       │
-  │ <─────────────────────────────│
-  │                               │
-  │  [User pays via Plasma]       │
-  │                               │
-  │  POST /pay/verify             │
-  │  { challengeId, txRef }       │
-  │ ─────────────────────────────>│
-  │                               │
-  │  200 OK                       │
-  │  { receipt, sessionToken }    │
-  │ <─────────────────────────────│
-  │                               │
-  │  GET /article/123             │
-  │  Authorization: Bearer token  │
-  │ ─────────────────────────────>│
-  │                               │
-  │  200 OK { fullContent }       │
-  │ <─────────────────────────────│
+Client                            Server
+  │                                 │
+  │  GET /article/:id               │
+  │  ──────────────────────────────>│
+  │                                 │
+  │  402 + PaymentChallenge         │
+  │  <──────────────────────────────│
+  │                                 │
+  │  [MetaMask signs tx on Plasma]  │
+  │                                 │
+  │  POST /pay/verify {txHash}      │
+  │  ──────────────────────────────>│
+  │                                 │
+  │  200 {receipt, sessionToken}    │
+  │  <──────────────────────────────│
+  │                                 │
+  │  GET /article/:id               │
+  │  Authorization: Bearer <token>  │
+  │  ──────────────────────────────>│
+  │                                 │
+  │  200 {article, hasFullAccess}   │
+  │  <──────────────────────────────│
 ```
 
-## Project Status
+---
 
-### Step 1 (Current): Foundation ✅
+## 🤖 Agent Demo Script
 
-- [x] Monorepo setup (pnpm + Turborepo)
-- [x] Protocol types (`@decagon/x402`)
-- [x] Effectful core (`@decagon/core`)
-- [x] API server with placeholder routes
-- [x] Web UI scaffold
-- [x] Documentation
+Test the full flow programmatically — policy checks, blocked payments, agent tokens, remittance:
 
-### Step 2 (Next): HTTP 402 Integration
+```bash
+# Local
+pnpm tsx scripts/agent-demo.ts
 
-- [ ] Return real HTTP 402 responses
-- [ ] Session token validation
-- [ ] Content gating based on payment
+# Production
+API_BASE=https://decagon-api.fly.dev pnpm tsx scripts/agent-demo.ts
 
-### Step 3 (Future): Blockchain Integration
+# With on-chain verification
+TX_HASH=0x... pnpm tsx scripts/agent-demo.ts
+```
 
-- [ ] Plasma stablecoin integration
-- [ ] On-chain payment verification
-- [ ] Wallet connection
+---
 
-## Contributing
+## 📦 Package Structure
 
-Decagon is built for the Effectful Programming bounty. See [EFFECTS.md](./EFFECTS.md) for details on the effectful architecture.
+```
+Decagon-core/
+├── packages/
+│   ├── x402/               # HTTP 402 protocol types (no logic)
+│   ├── core/               # Effectful business logic
+│   │   ├── capabilities/   #   Effect service interfaces (I/O boundaries)
+│   │   ├── workflows/      #   Pure Effect workflows
+│   │   ├── policy/         #   Pure policy check function
+│   │   ├── mocks/          #   In-memory mock implementations
+│   │   └── live/           #   Real RPC + verifier implementations
+│   └── ui/                 # React UI SDK (@decagon/ui)
+│       ├── PaymentSheet    #   Universal payment modal
+│       ├── useDecagonPayment # React hook for payment state
+│       └── types           #   Shared UI types
+├── apps/
+│   ├── api/                # Fastify HTTP server + SQLite
+│   └── web/                # Next.js 14 frontend
+├── scripts/
+│   └── agent-demo.ts       # CLI demo script
+├── EFFECTS.md              # Effectful architecture docs
+└── pnpm-workspace.yaml
+```
 
-## License
+---
+
+## 🧩 UI SDK (`@decagon/ui`)
+
+The `@decagon/ui` package provides a reusable **PaymentSheet** component for any vertical:
+
+```tsx
+import { PaymentSheet, useDecagonPayment } from "@decagon/ui";
+
+function MyPage() {
+  const payment = useDecagonPayment();
+
+  const handleBuy = async () => {
+    const challenge = await fetchChallenge();
+    payment.open({ challenge, config: { apiBase: "...", plasmaChainId: 9746 } });
+  };
+
+  return (
+    <>
+      <button onClick={handleBuy}>Buy</button>
+      {payment.isOpen && (
+        <PaymentSheet
+          challenge={payment.challenge!}
+          config={payment.config!}
+          purpose="remittance"       {/* or omit for article unlock */}
+          onClose={payment.close}
+          onSuccess={payment.onSuccess}
+        />
+      )}
+    </>
+  );
+}
+```
+
+The same `PaymentSheet` handles wallet connection, transaction signing, verification, and receipt display for both articles and remittance.
+
+---
+
+## 🏗 Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Frontend (Next.js 14)                        │
+│  ┌────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ Article    │  │ Remittance   │  │ Agent Dashboard         │ │
+│  │ Unlock     │  │ Transfer     │  │ (policy + tokens)       │ │
+│  └─────┬──────┘  └──────┬───────┘  └────────────┬────────────┘ │
+│        └────────────┬────┘                       │              │
+│              @decagon/ui PaymentSheet            │              │
+└──────────────────────┬───────────────────────────┘──────────────┘
+                       │ HTTP/REST
+                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     API Server (Fastify)                          │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │  runWorkflow()  →  Effect.provide(workflow, Capabilities) │   │
+│  └──────────────────────────────────────────────────────────┘   │
+│                       │                                          │
+│    ┌──────────────────┴──────────────────┐                      │
+│    ▼                                     ▼                      │
+│  In-Memory Mocks (dev)         SQLite Stores (prod)             │
+│  (Challenges, Articles)        (Receipts, Policies, Agents)     │
+└──────────────────────────────────────┬──────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Plasma Testnet (Chain 9746)                    │
+│  RPC: testnet-rpc.plasma.to  ·  Explorer: testnet.plasmascan.to│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🚢 Deployment
+
+### API → Fly.io
+
+```bash
+fly apps create decagon-api
+fly volumes create decagon_data --region sjc --size 1
+fly secrets set PRIVATE_KEY=0x... --app decagon-api
+fly deploy --app decagon-api
+```
+
+### Web → Vercel
+
+```bash
+cd apps/web
+vercel
+vercel env add NEXT_PUBLIC_API_BASE_URL  # https://decagon-api.fly.dev
+```
+
+---
+
+## 🛠 Technologies
+
+| Layer | Tech |
+|-------|------|
+| Type system | [Effect TS](https://effect.website) - typed functional programming |
+| API | [Fastify](https://fastify.dev) - high-performance HTTP |
+| Frontend | [Next.js 14](https://nextjs.org) - App Router |
+| Persistence | [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) - embedded SQL |
+| Chain | [Plasma Testnet](https://plasma.to) - EVM L2, chain 9746 |
+| Hosting | Fly.io (API) + Vercel (Web) |
+
+---
+
+## 📄 License
 
 MIT
