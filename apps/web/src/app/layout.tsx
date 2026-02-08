@@ -3,9 +3,9 @@ import "./globals.css";
 import { SiteShell } from "@/components/site-shell";
 
 export const metadata: Metadata = {
-  title: "Decagon | Stripe Checkout for HTTP 402 on Plasma",
+  title: "Decagon",
   description:
-    "Instant onchain settlement, agent-native spend limits, and receipts. No accounts required.",
+    "Pay-per-use payments via HTTP 402 on Plasma. Instant onchain settlement, agent-native spend limits, and receipts.",
 };
 
 export default function RootLayout({
