@@ -1,159 +1,26 @@
-# EFFECTS.md — Effectful Architecture Documentation
+# How Decagon Uses Effect
 
-This document describes the effectful architecture of Decagon, designed to qualify for the **Effectful Programming bounty**.
-
-## Overview
-
-Decagon uses the [Effect](https://effect.website) library to express **all** business logic as pure, composable workflows that:
-
-1. Have no direct side effects
-2. Declare their dependencies via the type system
-3. Can be tested in isolation with mock implementations
-4. Are executed only at the application boundary (API route handlers)
-
-Every payment flow — whether unlocking an article or sending a remittance transfer — follows the same effectful pipeline.
+Decagon's entire backend is built with [Effect](https://effect.website). This document explains why we chose it, how it shapes the codebase, and why it makes a real difference for a payment product.
 
 ---
 
-## HTTP 402 Payment Flow
+## Why Effect?
 
-The core flow demonstrates the architecture:
+Payments are high-stakes. A bug in transaction verification or session issuance can mean lost money. We needed a way to write business logic that is:
 
-```
-GET /article/:id (no auth)
-    ↓
-Workflow: getArticle
-    ↓ yields ArticlesStore, ChallengesStore, ChainConfigService
-    ↓ fails with PaymentRequiredError
-    ↓
-HTTP 402 + PaymentChallenge
-    ↓
-POST /pay/verify {challengeId, txHash}
-    ↓
-Workflow: verifyPaymentAndIssueSession
-    ↓ yields ChallengesStore (validate)
-    ↓ yields PaymentVerifier (verify on-chain)
-    ↓ yields ReceiptsStore (persist)
-    ↓
-SessionToken {tokenId, credits: 100}
-    ↓
-GET /article/:id + Authorization: Bearer <tokenId>
-    ↓
-Workflow: getArticle
-    ↓ yields ReceiptsStore (check & consume credits)
-    ↓
-ArticleResponse {hasFullAccess: true}
-```
+- **Provably correct at the type level.** Every workflow declares exactly what services it needs and what errors it can produce. If the types compile, the wiring is right.
+- **Testable without infrastructure.** We can run the full payment verification pipeline against in-memory mocks with zero setup. No databases, no RPC nodes, no wallets.
+- **Impossible to accidentally skip a step.** The type system forces you to provide every dependency. You literally cannot call `verifyPaymentAndIssueSession` without handing it a `ChallengesStore`, a `PaymentVerifier`, and a `ReceiptsStore`.
 
-## Remittance Transfer Flow
-
-Remittance reuses the same primitives — `PaymentChallenge`, `verifyPaymentAndIssueSession`, `Receipt` — with a different `resourceId` prefix:
-
-```
-POST /transfer/create {recipientAddress, note?}
-    ↓
-Workflow: createTransfer
-    ↓ yields ChallengesStore, Clock, IdGen, ChainConfigService
-    ↓ creates PaymentChallenge with resourceId = "transfer:{recipientAddress}"
-    ↓
-HTTP 402 + PaymentChallenge (same shape as article challenge)
-    ↓
-POST /transfer/verify {challengeId, txHash}
-    ↓
-Workflow: verifyTransfer
-    ↓ delegates to verifyPaymentAndIssueSession (same pipeline)
-    ↓
-Receipt + SessionToken
-```
-
-The key insight: `createTransfer` produces a standard `PaymentChallenge`. The `PaymentSheet` UI component doesn't need to know whether it's paying for an article or a remittance — it just resolves the challenge.
+Effect gives us all of this through its `Context`, `Layer`, and generator-based `Effect.gen` patterns.
 
 ---
 
-## Policy Enforcement Flow
+## How It Works in Practice
 
-A **policy gate** sits before every payment challenge, ensuring users and agents stay within configured limits:
+### Every side effect is a declared dependency
 
-```
-POST /policy/check {amountCents, path, origin?}
-    ↓ + Authorization: Bearer <agentToken?>
-    ↓
-Workflow: checkPaymentPolicy
-    ↓ yields AgentStore (resolve agent identity)
-    ↓ yields PolicyStore (fetch spend policy)
-    ↓ yields UsageStore (get daily spend)
-    ↓ calls pure checkPolicy() function
-    ↓
-PolicyCheckResult {allowed, needsConfirm, currentDailySpend}
-```
-
-### Pure Policy Check
-
-The core policy logic is a **pure function** — no effects, fully testable:
-
-```typescript
-// packages/core/src/policy/check-policy.ts
-export function checkPolicy(params: CheckPolicyParams): PolicyCheckResult {
-  // 1. Check path allowlist
-  // 2. Check origin allowlist
-  // 3. Check per-action limit
-  // 4. Check daily cap
-  // 5. Determine if confirmation needed
-  return { allowed: true, needsConfirm, policy, currentDailySpend };
-}
-```
-
-This pure function is wrapped in an Effect workflow that handles I/O:
-
-```typescript
-export const checkPaymentPolicy = (input) =>
-  Effect.gen(function* () {
-    const agentStore = yield* AgentStore;
-    const policyStore = yield* PolicyStore;
-    const usageStore = yield* UsageStore;
-    const dailySpend = yield* usageStore.getDailySpendCents(subjectId, dayKey);
-    return checkPolicy({ policy, amountCents, currentDailySpendCents: dailySpend, ... });
-  });
-```
-
----
-
-## Effect Capability Inventory
-
-All external interactions are modeled as **Effect services** — interfaces that abstract over I/O.
-
-### Core Capabilities
-
-| Capability | Purpose | Mock | Live |
-|------------|---------|------|------|
-| **ArticlesStore** | Article CRUD | ✅ In-memory | — |
-| **ReceiptsStore** | Receipts + sessions | ✅ In-memory | ✅ SQLite |
-| **ChallengesStore** | Payment challenges | ✅ In-memory | — (short-lived) |
-| **Clock** | Time operations | ✅ `Date.now()` | — |
-| **IdGen** | Unique ID generation | ✅ Counter-based | — |
-| **Logger** | Structured logging | ✅ Console | — |
-| **PaymentVerifier** | On-chain tx verification | ✅ Always-valid | ✅ RPC |
-
-### Policy & Agent Capabilities
-
-| Capability | Purpose | Mock | Live |
-|------------|---------|------|------|
-| **PolicyStore** | User spend policies | ✅ In-memory | ✅ SQLite |
-| **AgentStore** | Scoped agent tokens | ✅ In-memory | ✅ SQLite |
-| **UsageStore** | Daily spend tracking | ✅ In-memory | ✅ SQLite |
-
-### Chain Integration Capabilities
-
-| Capability | Purpose | Mock | Live |
-|------------|---------|------|------|
-| **ChainConfigService** | Chain config (RPC, chainId, payee) | ✅ Env vars | — |
-| **PlasmaRpc** | Plasma JSON-RPC client | ✅ Empty returns | ✅ fetch-based |
-
----
-
-## Effect Definitions
-
-Each capability is defined as an **Effect Context Tag**:
+Nothing in our core package touches a database, makes a network call, or reads the clock directly. Instead, each external interaction is modeled as a **capability interface**:
 
 ```typescript
 import { Context, Effect } from "effect";
@@ -167,19 +34,11 @@ export interface Clock {
 export const Clock = Context.GenericTag<Clock>("@decagon/core/Clock");
 ```
 
-### Key Principles
+Even something as simple as "what time is it?" goes through this interface. That means in tests we can freeze time, skip forward, or simulate expiration without touching `Date.now()`.
 
-1. **All methods return Effects** — Even `now()` returns `Effect.Effect<string>`, not `string`.
-2. **Error types are explicit** — `Effect.Effect<Article, ApiError>` makes failures visible.
-3. **No implementation details** — Interfaces define *what*, not *how*.
+### Workflows are pure pipelines
 
----
-
-## Pure Workflows
-
-All business logic lives in `packages/core/src/workflows/` as pure Effect pipelines.
-
-### `getArticle`
+All business logic lives in `packages/core/src/workflows/`. Here is the article unlock flow:
 
 ```typescript
 export const getArticle = (input: GetArticleInput) =>
@@ -191,7 +50,11 @@ export const getArticle = (input: GetArticleInput) =>
   });
 ```
 
-### `verifyPaymentAndIssueSession`
+This workflow reads like normal code, but nothing actually happens until it is executed. The `yield*` calls are just declaring "I need this service." The real implementation (SQLite, in-memory, whatever) gets provided later at the boundary.
+
+### One verify pipeline, multiple products
+
+This is where Effect really shines for us. The payment verification workflow handles idempotency, challenge validation, double-spend protection, on-chain verification, and session issuance:
 
 ```typescript
 export const verifyPaymentAndIssueSession = (input: VerifyPaymentInput) =>
@@ -200,24 +63,24 @@ export const verifyPaymentAndIssueSession = (input: VerifyPaymentInput) =>
     const challengesStore = yield* ChallengesStore;
     const paymentVerifier = yield* PaymentVerifier;
 
-    // Step 1: Idempotency — if receipt already exists for this txRef, return it
+    // 1. Idempotency: if receipt already exists for this txRef, return it
     const existing = yield* receiptsStore.getReceiptByTxRef(txRef);
     if (existing) return rehydrateSession(existing);
 
-    // Step 2: Validate challenge (not expired, not already paid)
+    // 2. Validate challenge (not expired, not already paid)
     const challenge = yield* challengesStore.get(input.challengeId);
 
-    // Step 3: Double-spend guard on txRef
+    // 3. Double-spend guard on txRef
     const isUsed = yield* paymentVerifier.isTransactionUsed(txRef);
 
-    // Step 4: Verify on-chain (or mock)
+    // 4. Verify on-chain (or mock)
     const result = yield* paymentVerifier.verify(challenge, proof);
 
-    // Step 5: Mark paid + used (atomically)
+    // 5. Mark paid + used atomically
     yield* challengesStore.markPaid(challenge.challengeId);
     yield* paymentVerifier.markTransactionUsed(txRef);
 
-    // Step 6: Build receipt + session
+    // 6. Build receipt + session
     yield* receiptsStore.saveReceipt(receipt);
     yield* receiptsStore.saveSession(sessionToken);
 
@@ -225,62 +88,61 @@ export const verifyPaymentAndIssueSession = (input: VerifyPaymentInput) =>
   });
 ```
 
-### `createTransfer`
+Both the **article paywall** and the **remittance transfer** use this exact same pipeline. A transfer just produces a `PaymentChallenge` with a different `resourceId` prefix (`transfer:0x...` instead of `article:article-1`). The verify workflow does not care what was purchased. It just validates the challenge and issues a session.
+
+This is not code reuse by coincidence. Effect's type system guarantees that any workflow requiring `ChallengesStore | PaymentVerifier | ReceiptsStore` will work with any product vertical that produces a standard `PaymentChallenge`.
+
+---
+
+## The Capability System
+
+Every external interaction in Decagon is modeled as a service interface. At startup, we pick real or mock implementations and wire them together using Effect's `Layer` system.
+
+### All Capabilities
+
+| Capability | What it does | Mock | Live |
+|------------|-------------|------|------|
+| `ArticlesStore` | Article CRUD | In-memory | n/a |
+| `ReceiptsStore` | Receipts + sessions | In-memory | SQLite |
+| `ChallengesStore` | Payment challenges | In-memory | n/a (short-lived) |
+| `PolicyStore` | User spend policies | In-memory | SQLite |
+| `AgentStore` | Scoped agent tokens | In-memory | SQLite |
+| `UsageStore` | Daily spend tracking | In-memory | SQLite |
+| `Clock` | Time operations | `Date.now()` | n/a |
+| `IdGen` | Unique ID generation | Counter-based | n/a |
+| `Logger` | Structured logging | Console | n/a |
+| `PaymentVerifier` | On-chain tx verification | Always-valid | RPC |
+| `ChainConfigService` | Chain config (RPC, chainId, payee) | Env vars | n/a |
+| `PlasmaRpc` | Plasma JSON-RPC client | Empty returns | fetch-based |
+
+In development, everything runs against mocks. In production, we swap in SQLite stores and a real RPC verifier. The workflows themselves never change.
 
 ```typescript
-export const createTransfer = (input: CreateTransferInput) =>
-  Effect.gen(function* () {
-    const idGen = yield* IdGen;
-    const clock = yield* Clock;
-    const challengesStore = yield* ChallengesStore;
-    const chainConfig = yield* ChainConfigService;
-    const config = yield* chainConfig.getConfig();
+const SqliteCapabilities = Layer.mergeAll(
+  MockArticlesStore,        // Static data, no need for DB
+  LiveReceiptsStore,        // SQLite
+  MockChallengesStore,      // Short-lived, in-memory is fine
+  LivePolicyStore,          // SQLite
+  LiveAgentStore,           // SQLite
+  LiveUsageStore,           // SQLite
+  MockClock,                // Stateless
+  MockIdGen,                // Stateless
+  MockLogger,               // Console
+  MockPaymentVerifier,      // TODO: wire live RPC verifier
+  MockChainConfig,          // Config from env
+  MockPlasmaRpc,            // TODO: wire live RPC
+);
 
-    const challenge: PaymentChallenge = {
-      challengeId: yield* idGen.challengeId(),
-      resourceId: `transfer:${input.recipientAddress}`,
-      // ... same shape as article challenge
-    };
-
-    yield* challengesStore.save(challenge);
-    return { challenge, recipientAddress: input.recipientAddress, note: input.note };
-  });
+const Capabilities = USE_SQLITE ? SqliteCapabilities : MockCapabilities;
 ```
+
+This is powerful. We can run the entire API with zero external dependencies for local development, then flip `USE_SQLITE=true` and everything persists to disk. The business logic does not know the difference.
 
 ---
 
-## UI SDK Boundary
+## The Boundary: Where Effects Actually Run
 
-The `@decagon/ui` package sits **outside** the Effect boundary. It consumes `PaymentChallenge` objects (plain JSON from API responses) and calls API endpoints to verify payments.
-
-```
-┌───────────────────────────────┐
-│        @decagon/ui            │  React (client-side)
-│  PaymentSheet component       │  No Effect dependency
-│  useDecagonPayment hook       │  Calls /pay/verify or /transfer/verify
-└───────────────┬───────────────┘
-                │ fetch()
-                ▼
-┌───────────────────────────────┐
-│        apps/api               │  Fastify (server-side)
-│  runWorkflow() boundary       │  Effect.provide(workflow, Capabilities)
-└───────────────┬───────────────┘
-                │
-                ▼
-┌───────────────────────────────┐
-│        @decagon/core          │  Pure Effect workflows
-│  getArticle, createTransfer,  │  No HTTP, no fetch, no DOM
-│  verifyPaymentAndIssueSession │
-└───────────────────────────────┘
-```
-
-The `PaymentSheet` component accepts a `config` prop with `apiBase`, `plasmaChainId`, etc. — keeping it decoupled from any specific deployment. The `purpose` prop (`"remittance"` or default) adapts success messages and labels.
-
----
-
-## Runtime Execution
-
-Effects are executed **only** at the API boundary:
+Effects never run inside the core package. They only execute at the API boundary, where Fastify route handlers provide real implementations:
 
 ```typescript
 // apps/api/src/index.ts
@@ -298,41 +160,52 @@ server.get("/article/:id", async (request, reply) => {
 });
 ```
 
-### Capability Layer Selection
-
-```typescript
-const SqliteCapabilities = Layer.mergeAll(
-  MockArticlesStore,        // Static data
-  LiveReceiptsStore,        // SQLite
-  MockChallengesStore,      // Short-lived, in-memory is fine
-  LivePolicyStore,          // SQLite
-  LiveAgentStore,           // SQLite
-  LiveUsageStore,           // SQLite
-  MockClock,                // Stateless
-  MockIdGen,                // Stateless
-  MockLogger,               // Console
-  MockPaymentVerifier,      // TODO: wire live RPC verifier
-  MockChainConfig,          // Config from env
-  MockPlasmaRpc,            // TODO: wire live RPC
-);
-
-const Capabilities = USE_SQLITE ? SqliteCapabilities : MockCapabilities;
-```
+`runWorkflow` is the single point where the Effect world meets the HTTP world. It provides all capabilities, runs the effect, and converts the result into an HTTP response. Every route handler follows this same pattern.
 
 ---
 
-## On-Chain Verification
+## Policy Enforcement
 
-The live `PaymentVerifier` performs real blockchain verification with Effect's retry and timeout:
+A policy gate sits before every payment, ensuring users and agents stay within configured limits. The core policy logic is a **pure function** with no effects at all:
 
 ```typescript
-// packages/core/src/live/plasma-rpc.ts
+// packages/core/src/policy/check-policy.ts
+export function checkPolicy(params: CheckPolicyParams): PolicyCheckResult {
+  // 1. Check path allowlist
+  // 2. Check origin allowlist
+  // 3. Check per-action limit
+  // 4. Check daily cap
+  // 5. Determine if confirmation needed
+  return { allowed: true, needsConfirm, policy, currentDailySpend };
+}
+```
 
+This pure function is wrapped in an Effect workflow that fetches the data it needs:
+
+```typescript
+export const checkPaymentPolicy = (input) =>
+  Effect.gen(function* () {
+    const agentStore = yield* AgentStore;
+    const policyStore = yield* PolicyStore;
+    const usageStore = yield* UsageStore;
+    const dailySpend = yield* usageStore.getDailySpendCents(subjectId, dayKey);
+    return checkPolicy({ policy, amountCents, currentDailySpendCents: dailySpend, ... });
+  });
+```
+
+Pure logic stays pure. I/O stays at the edges. This makes the policy engine trivially testable: just call `checkPolicy()` with different inputs and assert the output.
+
+---
+
+## On-Chain Verification with Retry and Timeout
+
+Blockchain RPC calls are unreliable. Effect gives us composable retry and timeout strategies out of the box:
+
+```typescript
 const verifyOnChain = (challenge, proof) =>
   Effect.gen(function* () {
     const rpc = yield* PlasmaRpc;
     const tx = yield* rpc.getTransaction(proof.txHash);
-    // Verify recipient, amount, receipt status
     const receipt = yield* rpc.getTransactionReceipt(proof.txHash);
     return { valid: receipt.status === "0x1", txHash: proof.txHash, ... };
   }).pipe(
@@ -342,76 +215,61 @@ const verifyOnChain = (challenge, proof) =>
   );
 ```
 
----
-
-## Mock Implementations
-
-For development and testing, mock implementations are provided in `packages/core/src/mocks/`:
-
-```typescript
-export const MockCapabilities = Layer.mergeAll(
-  MockArticlesStore,
-  MockReceiptsStore,
-  MockChallengesStore,
-  MockPolicyStore,
-  MockAgentStore,
-  MockUsageStore,
-  MockClock,
-  MockIdGen,
-  MockLogger,
-  MockPaymentVerifier,
-  MockChainConfig,
-  MockPlasmaRpc,
-);
-```
-
-Each mock uses `Layer.succeed` to provide a concrete implementation:
-
-```typescript
-export const MockClock = Layer.succeed(Clock, Clock.of({
-  now: () => Effect.sync(() => new Date().toISOString()),
-  isPast: (iso) => Effect.sync(() => new Date(iso).getTime() < Date.now()),
-  // ...
-}));
-```
+Three retries with exponential backoff, a 30-second timeout, and a graceful fallback. All composed declaratively, no try/catch nesting, no manual timer logic.
 
 ---
 
-## Data Flow
+## The UI Stays Outside Effect
+
+The `@decagon/ui` React package has **zero dependency on Effect**. It consumes `PaymentChallenge` objects (plain JSON from the API) and calls REST endpoints to verify payments. This is intentional:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        HTTP Request                              │
-│              GET /article/123  or  POST /transfer/create         │
-└──────────────────────────────┬──────────────────────────────────┘
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Route Handler (apps/api)                    │
-│   Parse request → Create Effect → Run with Capabilities → Reply │
-└──────────────────────────────┬──────────────────────────────────┘
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  Pure Effect Workflow (packages/core)             │
-│   Effect.Effect<Response, ApiError, Capability1 | Capability2>   │
-│   No direct I/O · All deps in type signature · Composable        │
-└──────────────────────────────┬──────────────────────────────────┘
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  Capability Layer (Mock or SQLite)                │
-│   Layer.mergeAll(Store1, Store2, ...) → provides all services    │
-└─────────────────────────────────────────────────────────────────┘
+@decagon/ui (React)          Plain fetch() calls
+       |
+       v
+apps/api (Fastify)           runWorkflow() boundary
+       |
+       v
+@decagon/core (Effect)       Pure workflows, no HTTP, no DOM
+```
+
+The `PaymentSheet` component works the same whether it is paying for an article or a remittance transfer. It does not know or care about Effect. It just resolves whatever `PaymentChallenge` the server hands it.
+
+---
+
+## What This Gets Us
+
+| What | How |
+|------|-----|
+| **Zero-setup local dev** | All mocks are provided via `Layer.mergeAll`. Run `pnpm dev` and the full API works with no database or RPC node. |
+| **Confident refactoring** | If you change a capability interface, the compiler tells you every workflow that needs updating. Nothing silently breaks. |
+| **One payment pipeline for everything** | Articles and remittance both produce a `PaymentChallenge` and flow through the same `verifyPaymentAndIssueSession` workflow. Adding a new product vertical means writing one new `create` workflow. |
+| **Type-safe error handling** | Every workflow declares its error types. `Effect.Effect<Article, PaymentRequiredError | NotFoundError>` means the route handler knows exactly what can go wrong. |
+| **Composable resilience** | Retry, timeout, and fallback for on-chain verification are one-liners, not nested try/catch blocks. |
+| **Clean testing boundary** | Business logic is tested with mock capabilities. API routes are tested with real HTTP. Neither test needs the other's infrastructure. |
+
+---
+
+## Project Structure
+
+```
+Decagon-core/
+  packages/
+    x402/                HTTP 402 protocol types (shared between client and server)
+    core/
+      capabilities/      Effect service interfaces (the I/O boundaries)
+      workflows/         Pure Effect pipelines (all business logic)
+      policy/            Pure policy check function (no effects)
+      mocks/             In-memory mock implementations for dev and test
+      live/              Real SQLite and RPC implementations for production
+    ui/                  React PaymentSheet SDK (no Effect dependency)
+  apps/
+    api/                 Fastify server, the runWorkflow() boundary
+    web/                 Next.js 14 frontend
 ```
 
 ---
 
-## Benefits
+## Summary
 
-| Principle | Implementation |
-|-----------|----------------|
-| Pure core | All workflows in `packages/core/src/workflows/` |
-| Explicit effects | Capability interfaces in `packages/core/src/capabilities/` |
-| Dependency injection | Effect's `Context` and `Layer` system |
-| Type-safe errors | `ApiError` discriminated union, explicit in signatures |
-| Runtime at boundary | `Effect.runPromiseExit` only in API route handlers |
-| Reusable verticals | Remittance reuses article's verify pipeline and PaymentSheet |
-| UI decoupled from Effects | `@decagon/ui` is plain React — no Effect dependency |
+Effect is not just a library we dropped in. It is the architecture. Every payment workflow, every capability boundary, every mock-vs-live swap, and every error path is expressed through Effect's type system. The result is a payment backend where the compiler catches wiring mistakes, where adding a new product vertical is a single workflow file, and where local development works identically to production without any external dependencies.
