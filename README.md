@@ -2,7 +2,7 @@
 
 > Pay-per-use payments for the web using HTTP 402 on Plasma.
 
-**[Live Demo](https://decagon-core.vercel.app)** · **[EFFECTS.md](./EFFECTS.md)**
+**[Me LOOKSMAXXING](https://github.com/Decagon-Pay)** · **[Live Demo](https://decagon-core-web.vercel.app/)** · **[EFFECTS.md](./EFFECTS.md)**
 
 ---
 
@@ -122,3 +122,4 @@ Decagon-core/
 ## License
 
 MIT
+
